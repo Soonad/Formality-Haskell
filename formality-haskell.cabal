@@ -12,11 +12,13 @@ cabal-version:       >=1.10
 library
   default-language: Haskell2010
   hs-source-dirs: src
-  exposed-modules: FormalityNet
+  exposed-modules: FormalityNet, ElementaryAffineCore.Parser
   build-depends:
     base
     , containers
     , transformers
+    , megaparsec
+    , text
 
 test-suite test
   type: exitcode-stdio-1.0
