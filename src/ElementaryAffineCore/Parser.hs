@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- |
 -- Module      : ElementaryAffineCore.Parser
 -- Copyright   : [2019] Serokell
@@ -23,22 +23,8 @@ import Text.Megaparsec.Char (char, newline, space1, string)
 import qualified Data.Map as M
 import qualified Text.Megaparsec.Char.Lexer as L
 
-newtype Variable = Variable {getName :: Text}
-  deriving Show
+import ElementaryAffineCore.Types
 
-data Term =   Var {getVVar        :: Variable}
-            | Lam {getLVar        :: [Variable] , getLExp         :: Exp}
-            | App {getFirstAppExp :: Exp        , getSecondAppExp :: Exp}
-            | Put {getBoxExp      :: Exp}
-            | Dup {getDupVar      :: Variable   , getDupTerm      :: Exp, getInTerm :: Exp}
-            deriving Show
-
--- | Expression contains a term (as a term or a link to a term)
-data Exp = Exp {getPos :: SourcePos, getTerm :: Either Text Term, getEnv :: Exps}
-  deriving Show
-
--- | Map between expressions and their names.
-type Exps = M.Map Text Exp
 
 type Parser = Parsec Void Text
 
