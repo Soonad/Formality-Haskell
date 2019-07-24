@@ -44,19 +44,19 @@ data Node = Node
   } deriving Eq
 
 instance Show Node where
-  show (Node Z k sP sL sR n) =
-    concat ["Z",show k,"{",show sP,",",show sL,",",show sR,"}"]
-  show (Node U k sP sL sR n) =
-    concat ["U",show k,show n,"{",show sP,",",show sL,"}"]
-  show (Node B k sP sL sR n) =
-    concat ["B",show k,"{",show sP,",",show sL,",",show sR,"}"]
-  show (Node I k sP sL sR n) =
-    concat ["I",show k,"{",show sP,",",show sL,",",show sR,"}"]
-  show (Node N k sP sL sR n) =
-    concat ["N",show n,"{",show sP,"}"]
+  show (Node Z k sP sL sR _) =
+    concat [show Z, show k, "{", show sP, ",", show sL, ",", show sR, "}"]
+  show (Node U k sP sL _  n) =
+    concat [show U, show k, show n, "{", show sP, ",", show sL, "}"]
+  show (Node B k sP sL sR _) =
+    concat [show B, show k, "{", show sP, ",", show sL, ",", show sR, "}"]
+  show (Node I k sP sL sR _) =
+    concat [show I, show k, "{", show sP, ",", show sL, ",", show sR, "}"]
+  show (Node N _ sP _  _  n) =
+    concat [show N, show n, "{", show sP, "}"]
 
 defaultNode :: Int -> NodeType -> Kind -> Int -> Node
-defaultNode i nt k num = Node nt k (Ptr i P) (Ptr i L) (Ptr i R) num
+defaultNode i nt k = Node nt k (Ptr i P) (Ptr i L) (Ptr i R)
 
 makeNet :: [Node] -> Net
 makeNet nodes = let n = M.fromList $ zip [0..] nodes in Net n [] (findRedexes n)
@@ -69,31 +69,34 @@ findRedexes nodes = deDup $ (toNode . slotP) <$> M.filterWithKey isRedex nodes
       _         -> False
     deDup = Set.toList . (M.foldrWithKey f Set.empty)
     f k v s
-      | Set.member (v, k) s = s
-      | otherwise = (Set.insert (k, v) s)
+      | Set.member (v, k) s =                   s
+      | otherwise           = Set.insert (k, v) s
 
 slot :: Slot -> Node -> Port
-slot s n = case s of P -> slotP n; L -> slotL n; R -> slotR n
+slot P = slotP
+slot L = slotL
+slot R = slotR
 
 setSlot :: Slot -> Port -> Node -> Node
-setSlot s q n = case s of
-  P -> n { slotP = q }; L -> n {slotL = q }; R -> n { slotR = q }
+setSlot P q n = n { slotP = q }
+setSlot L q n = n { slotL = q }
+setSlot R q n = n { slotR = q }
 
 allocNode :: NodeType -> Kind -> Int -> State Net Int
 allocNode t k n = do
   freed <- gets freedNodes
   case freed of
-    (f:_) -> return f
-    [] -> do
-      addr <- gets $ (maybe 0 ((+1) . fst)) . M.lookupMax . netNodes
+    (f : _) -> return f
+    []      -> do
+      addr <- gets $ maybe 0 ((+1) . fst) . M.lookupMax . netNodes
       let node = defaultNode addr t k n
       modify (\n -> n { netNodes = M.insert addr node $ netNodes n })
       return addr
 
 freeNode :: Int -> State Net ()
-freeNode addr = do
+freeNode addr =
   modify $ \n -> n
-      { netNodes = M.delete addr $ netNodes n
+      { netNodes   = M.delete addr $ netNodes n
       , freedNodes = addr : (freedNodes n)
       }
 
@@ -102,7 +105,7 @@ getPort addr s net = (slot s) (net M.! addr)
 
 setPort :: Int -> Slot -> Port -> State Net ()
 setPort addr s port = modify $ \net ->
-  net {netNodes = M.adjust (setSlot s port) addr $ netNodes net }
+  net { netNodes = M.adjust (setSlot s port) addr $ netNodes net }
 
 linkSlots :: (Int, Slot) -> (Int, Slot) -> State Net ()
 linkSlots (ia, sa) (ib, sb) = do
@@ -123,11 +126,11 @@ linkPorts (ia, sa) (ib, sb) = do
 unlinkPort :: (Int, Slot) -> State Net ()
 unlinkPort (ia, sa) = do
   net <- gets netNodes
-  case (getPort ia sa net) of
+  case getPort ia sa net of
     (Ptr ib sb) -> do
       setPort ia sa $ Ptr ia sa
       setPort ib sb $ Ptr ib sb
-    _ -> return ()
+    _           -> return ()
 
 rewrite :: (Int, Int) -> State Net ()
 rewrite (iA, iB) = do
@@ -178,10 +181,10 @@ match iA iB = do
       iP <- allocNode Z (kind a) 0
       linkPorts (iA, L) (iP, P)
       if
-        | (num b) == 0 -> linkPorts (iA, R) (iP,L)
-        | otherwise    -> linkPorts (iA, R) (iP,R)
+        | num b == 0 -> linkPorts (iA, R) (iP, L)
+        | otherwise  -> linkPorts (iA, R) (iP, R)
 
-    _ -> match iB iA
+    _      -> match iB iA
 
 annihilate :: Int -> Int -> State Net ()
 annihilate iA iB = do
@@ -195,9 +198,9 @@ duplicate1 (iA, a) (iB, b) = do
   iR <- allocNode (typeOf a) (kind a) 0
   linkSlots (iR, R) (iQ, L)
   linkSlots (iR, L) (iP, L)
-  linkPorts (iP,P) (iA,L)
-  linkPorts (iQ,P) (iA,R)
-  linkPorts (iR,P) (iB,L)
+  linkPorts (iP, P) (iA, L)
+  linkPorts (iQ, P) (iA, R)
+  linkPorts (iR, P) (iB, L)
 
 duplicate :: (Int, Node) -> (Int, Node) -> State Net ()
 duplicate (iA, a) (iB, b) = do
@@ -209,10 +212,10 @@ duplicate (iA, a) (iB, b) = do
   linkSlots (iR, R) (iQ, L)
   linkSlots (iS, R) (iQ, R)
   linkSlots (iR, L) (iP, L)
-  linkPorts (iP,P) (iA,L)
-  linkPorts (iQ,P) (iA,R)
-  linkPorts (iR,P) (iB,L)
-  linkPorts (iS,P) (iB,R)
+  linkPorts (iP, P) (iA, L)
+  linkPorts (iQ, P) (iA, R)
+  linkPorts (iR, P) (iB, L)
+  linkPorts (iS, P) (iB, R)
 
 arithmetic :: Kind -> Int -> Int -> Int
 arithmetic f n m =
@@ -239,9 +242,9 @@ reduce :: Net -> (Net, Int)
 reduce net =
   let go net count =
         case netRedex net of
-          [] -> (net, count)
-          r:rs -> let newNet = execState (rewrite r) (net { netRedex = rs })
-                   in go newNet (count + 1)
+          []     -> (net, count)
+          r : rs -> let newNet = execState (rewrite r) (net { netRedex = rs })
+                     in go newNet (count + 1)
   in go net 0
 
 
