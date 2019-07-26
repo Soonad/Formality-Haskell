@@ -2,7 +2,7 @@ name:                formality-haskell
 version:             0.1.0.0
 homepage:            https://gitlab.com/moonad/formality-haskell#readme
 author:              John C. Burnham
-license:             AGPL-3
+license:             MIT
 license-file:        LICENSE
 maintainer:          john@sunshinecybernetics.com
 category:            Web
