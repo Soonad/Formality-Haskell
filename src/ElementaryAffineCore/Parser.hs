@@ -1,10 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, DataKinds #-}
 -- |
 -- Module      : ElementaryAffineCore.Parser
--- Copyright   : [2019] Serokell
--- License     : ?
+-- Copyright   : [2019] Sunshine Cybernetics
+-- License     : MIT
 --
--- Maintainer  : Serokell
+-- Maintainer  : Sunshine Cybernetics
 -- Stability   : experimental
 -- Portability : non-portable (GHC extensions)
 --
@@ -28,6 +28,9 @@ import ElementaryAffineCore.Types
 
 type Parser = Parsec Void Text
 
+type RTerm = Term 'Raw
+
+type RExp = Expression 'Raw
 -- | Spaces and comments consumer.
 scc :: Parser ()
 scc = L.space (space1 <|> skipSome newline) lineCmnt blockCmnt
@@ -63,8 +66,8 @@ rsWords :: [Text]
 rsWords = ["dup", "def"]
 
  -- | Parser of a term.
-term_ :: [Text] -> Parser Term
-term_ vars = choice $ try <$>
+term_ :: [Text] -> Parser RTerm
+term_ vars = choice
              [ app_ vars
              , lam_ vars
              , put_ vars
@@ -74,54 +77,54 @@ term_ vars = choice $ try <$>
 
 -- | Parser of an expression. All unkown strings are parsed as links to terms.
 -- During the substitution all links without corresponding term will be marked as free variables.
-expression :: [Text] -> Parser Exp
+expression :: [Text] -> Parser RExp
 expression vars = lexeme $ do
     pos  <- getSourcePos
-    env  <- (let_ vars) <|> (return M.empty)
-    (term_ vars >>= \term -> return $ Exp pos (Right term) env) <|>
-      (symb >>= \link -> return $ Exp pos (Left link) env)
+    env  <- let_ vars <|> return M.empty
+    (term_ vars >>= \term -> return $ ExpRaw pos term env) <|>
+      (symb >>= \link -> return $ ExpRaw pos (Link link) env)
 
 -- | Name of a top-level expression.
 topExpName :: Parser Text
 topExpName = lexeme $ between (lString "def") (symbol ":") symb
 
-topExpression :: Parser (Text,Exp)
+topExpression :: Parser (Text,RExp)
 topExpression = lexeme $ (,) <$> topExpName <*> expression []
 
-topExpressions :: Parser Exps
-topExpressions = M.fromList <$> (lexeme $ many topExpression)
+topExpressions :: Parser (Exps 'Raw)
+topExpressions = M.fromList <$> lexeme (many topExpression)
 
 -- Parsers of the specific terms
 
-let_ :: [Text] -> Parser Exps
+let_ :: [Text] -> Parser (Exps 'Raw)
 let_ vars = lexeme $ do
-    exps <- some $ (,) <$> (between (lString "let") (symbol ":") symb) <*> expression vars
+    exps <- some $ (,) <$> between (lString "let") (symbol ":") symb <*> expression vars
     return $ M.fromList exps
 
-put_ :: [Text] -> Parser Term
+put_ :: [Text] -> Parser RTerm
 put_ vars = do
     char '#'
-    term <- expression vars
+    term <- (try $ expression vars) <|> parens (expression vars)
     return $ Put term
 
-app_ :: [Text] -> Parser Term
+app_ :: [Text] -> Parser RTerm
 app_ vars = parens $ do
     term1 <- expression vars
     term2 <- expression vars
     return $ App term1 term2
 
-lam_ :: [Text] -> Parser Term
+lam_ :: [Text] -> Parser RTerm
 lam_ oldVars = lexeme $ do
-    vars <- (figureBrackets $ some symb)
-    exp  <- expression (oldVars ++ vars)
-    return $ Lam (Variable <$> vars) exp
+    var <- figureBrackets symb
+    exp  <- expression (var : oldVars)
+    return $ Lam (Variable var) exp
 
 -- | We parse only bounded or duplicated variables. All other variables are parsed as links to terms.
 -- They will be marked as variables during the substitution phase.
-var_ :: [Text] -> Parser Term
-var_ vars = lexeme $ Var <$> Variable <$> (choice $ map (try . chunk) vars)
+var_ :: [Text] -> Parser RTerm
+var_ vars = lexeme (Var . Variable <$> choice (map chunk vars))
 
-dup_ :: [Text] -> Parser Term
+dup_ :: [Text] -> Parser RTerm
 dup_ vars = lexeme $ do
     lString "dup"
     var <- symb

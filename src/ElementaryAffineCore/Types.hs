@@ -1,40 +1,62 @@
+{-# LANGUAGE UndecidableInstances, StandaloneDeriving, FlexibleContexts, GADTs, TypeFamilies, DataKinds, NoStarIsType #-}
 -- |
 -- Module      : ElementaryAffineCore.Types
--- Copyright   : [2019] Serokell
--- License     : ?
+-- Copyright   : [2019] Sunshine Cybernetics
+-- License     : MIT
 --
--- Maintainer  : Serokell
+-- Maintainer  : Sunshine Cybernetics
 -- Stability   : experimental
 -- Portability : non-portable (GHC extensions)
 --
--- Main types of terms and expressions
+-- Main types with terms and expressions
 
 module ElementaryAffineCore.Types where
 
-import qualified Data.Map as M
+import Data.Kind (Type)
 import Data.Text (Text)
-
 import Text.Megaparsec (SourcePos(..))
 
+import qualified Data.Map as M
+
 newtype Variable = Variable {getName :: Text}
+  deriving (Eq, Ord, Show)
+
+-- | Possible types of terms. Raw terms are used only before the substitution phase.
+data ExpType = Raw | Final deriving Show
+
+-- | Corresponding type of expression.
+type family Expression (t :: ExpType) :: Type where
+    Expression 'Raw = ExpRaw
+    Expression 'Final = Exp
+
+-- | Main term data type. Raw term contains expressions with local variables as environment.
+data Term (typeOfExp :: ExpType) = Show (Expression typeOfExp) =>
+      Var  {getVVar   :: Variable}
+    | Lam  {getLVar   :: Variable,              getLExp    :: Expression typeOfExp}
+    | App  {getAppExp :: Expression typeOfExp , getArgExp  :: Expression typeOfExp}
+    | Put  {getBoxExp :: Expression typeOfExp}
+    | Dup  {getDupVar :: Variable,              getDupTerm :: Expression typeOfExp, getInTerm :: Expression typeOfExp}
+    | Link {getLink   :: Text}
+
+deriving instance (Show (Expression typeOfExp)) => Show (Term typeOfExp)
+
+-- | Raw expression contains a term, its position in a source file and environment (local definitions)
+data ExpRaw = ExpRaw {getRPos :: SourcePos, getRTerm :: Term 'Raw, getEnv :: Exps 'Raw}
   deriving Show
-
-data Term =   Var {getVVar        :: Variable}
-            | Lam {getLVar        :: [Variable] , getLExp         :: Exp}
-            | App {getFirstAppExp :: Exp        , getSecondAppExp :: Exp}
-            | Put {getBoxExp      :: Exp}
-            | Dup {getDupVar      :: Variable   , getDupTerm      :: Exp, getInTerm :: Exp}
-            deriving Show
-
--- | Expression contains a term (as a term or a link to a term)
-data Exp = Exp {getPos :: SourcePos, getTerm :: Either Text Term, getEnv :: Exps}
+-- | Expression contains a term and its position in a source file.
+data Exp = Exp {getPos :: SourcePos, getTerm :: Term 'Final}
   deriving Show
 
 -- | Map between expressions and their names.
-type Exps = M.Map Text Exp
+type Exps typeOfExp = M.Map Text (Expression typeOfExp)
 
 data StratificationRule = FirstStratRule | SecondStratRule Int | ThirdStratRule Int
   deriving Show
 
+-- | Type containing information about stratification error.
 data StratificationRuleBroken = StratificationRuleBroken StratificationRule SourcePos Variable
+  deriving Show
+
+-- | Possible warnings.
+data Warning = FreeVariable Variable
   deriving Show
