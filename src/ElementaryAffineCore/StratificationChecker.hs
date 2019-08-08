@@ -1,4 +1,6 @@
-{-# LANGUAGE AllowAmbiguousTypes, DataKinds, RankNTypes #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE RankNTypes          #-}
 -- |
 -- Module      : ElementaryAffineCore.StratificationChecker
 -- Copyright   : [2019] Sunshine Cybernetics
@@ -8,9 +10,10 @@
 -- Stability   : experimental
 -- Portability : non-portable (GHC extensions)
 --
--- Check terms for the stratification rules
+-- Checking terms for the stratification rules.
 
-module ElementaryAffineCore.StratificationChecker where
+module ElementaryAffineCore.StratificationChecker
+  (checkExp) where
 
 import Control.Monad.Except (Except,forM_, throwError)
 import Data.Functor (($>))
@@ -22,19 +25,21 @@ import ElementaryAffineCore.Types
 data NumberOfUsages = Zero | One
   deriving Show
 
-type NumberOfBoxes = NumberOfUsages
-
 type RTerm = Term 'Raw
 
 type RExp = Expression 'Raw
 
 -- | Check all three stratification rules
-checkExp :: RExp -> Except StratificationRuleBroken ()
+checkExp
+  :: RExp
+  -> Except StratificationRuleBroken ()
 checkExp e = checkFirstRule e *> checkSecondRule e *> checkThirdRule e
 
 
 -- | Check that variables bound by lambdas are used at most once.
-checkFirstRule :: RExp -> Except StratificationRuleBroken ()
+checkFirstRule
+  :: RExp
+  -> Except StratificationRuleBroken ()
 checkFirstRule (ExpRaw pos term env) =
     case term of
         Lam vars e ->
@@ -44,10 +49,13 @@ checkFirstRule (ExpRaw pos term env) =
         Put e -> checkFirstRule e
         Dup _ dupTerm inTerm -> checkFirstRule dupTerm *> checkFirstRule inTerm
         Var _ -> return ()
-        Link name -> forM_ (M.lookup name env) checkFirstRule
+        Reference name -> forM_ (M.lookup name env) checkFirstRule
 
--- | Check that there is exactly 0 boxes between a variable bound by a lambda and its occurrence.
-checkSecondRule :: RExp -> Except StratificationRuleBroken ()
+-- | Check that there are exactly 0 boxes between a variable bounded
+-- by a lambda and its occurrence.
+checkSecondRule
+  :: RExp
+  -> Except StratificationRuleBroken ()
 checkSecondRule (ExpRaw pos term env) =
     case term of
         Lam vars e ->
@@ -57,10 +65,13 @@ checkSecondRule (ExpRaw pos term env) =
         Put e -> checkSecondRule e
         Dup _ dupTerm inTerm -> checkSecondRule dupTerm *> checkSecondRule inTerm
         Var _ -> return ()
-        Link name -> forM_ (M.lookup name env) checkSecondRule
+        Reference name -> forM_ (M.lookup name env) checkSecondRule
 
--- | Check that there is exactly 1 box between a variable bound by a duplication and its occurrence.
-checkThirdRule :: RExp -> Except StratificationRuleBroken ()
+-- | Check that there is exactly 1 box between a variable bounded
+-- by a duplication and its occurrence.
+checkThirdRule
+  :: RExp
+  -> Except StratificationRuleBroken ()
 checkThirdRule (ExpRaw pos term env) =
     case term of
         Lam vars e -> checkThirdRule e
@@ -70,11 +81,15 @@ checkThirdRule (ExpRaw pos term env) =
           let dupVarName = getName var
           in checkDupVar 0 inTerm dupVarName *> return ()
         Var _ -> return ()
-        Link name -> forM_ (M.lookup name env) checkThirdRule
+        Reference name -> forM_ (M.lookup name env) checkThirdRule
 
 -- Auxillary functions
 
-checkBoundedVarFirst :: NumberOfUsages -> RExp -> Text -> Except StratificationRuleBroken NumberOfUsages
+checkBoundedVarFirst
+  :: NumberOfUsages
+  -> RExp
+  -> Text
+  -> Except StratificationRuleBroken NumberOfUsages
 checkBoundedVarFirst alreadyUsed (ExpRaw pos term env) name =
     case term of
         Var v@(Variable nameIn) ->
@@ -97,17 +112,23 @@ checkBoundedVarFirst alreadyUsed (ExpRaw pos term env) name =
             let boundedVarName = getName var
             (if name == boundedVarName
              then return alreadyUsed
-             else checkBoundedVarFirst alreadyUsed e name) <* checkBoundedVarFirst Zero e boundedVarName
-        Link name -> case M.lookup name env of
+             else checkBoundedVarFirst alreadyUsed e name) <*
+                checkBoundedVarFirst Zero e boundedVarName
+        Reference name -> case M.lookup name env of
           Just exp -> checkFirstRule exp $> alreadyUsed
           Nothing  -> return alreadyUsed
 
-checkBoundedVarBoxes :: Int -> RExp -> Text -> Except StratificationRuleBroken Int
+checkBoundedVarBoxes
+  :: Int
+  -> RExp
+  -> Text
+  -> Except StratificationRuleBroken Int
 checkBoundedVarBoxes numOfBoxes (ExpRaw pos term env) name =
     case term of
         Var v@(Variable nameIn) ->
           if name == nameIn && numOfBoxes /= 0
-          then throwError $ StratificationRuleBroken (SecondStratRule numOfBoxes) pos v
+          then throwError $
+              StratificationRuleBroken (SecondStratRule numOfBoxes) pos v
           else return numOfBoxes
         App exp1 exp2 -> do
             n1 <- checkBoundedVarBoxes numOfBoxes exp1 name
@@ -123,16 +144,21 @@ checkBoundedVarBoxes numOfBoxes (ExpRaw pos term env) name =
             (if name == boundedVarName
              then return numOfBoxes
              else checkBoundedVarBoxes numOfBoxes e name) <* checkBoundedVarBoxes 0 e boundedVarName
-        Link name -> case M.lookup name env of
+        Reference name -> case M.lookup name env of
           Just exp -> checkSecondRule exp $> numOfBoxes
           Nothing  -> return numOfBoxes
 
-checkDupVar :: Int -> RExp -> Text -> Except StratificationRuleBroken Int
+checkDupVar
+  :: Int
+  -> RExp
+  -> Text
+  -> Except StratificationRuleBroken Int
 checkDupVar numOfBoxes (ExpRaw pos term env) name =
     case term of
         Var v@(Variable nameIn) ->
           if name == nameIn && numOfBoxes /= 1
-          then throwError $ StratificationRuleBroken (ThirdStratRule numOfBoxes) pos v
+          then throwError $
+              StratificationRuleBroken (ThirdStratRule numOfBoxes) pos v
           else return numOfBoxes
         App exp1 exp2 -> do
             n1 <- checkDupVar numOfBoxes exp1 name
@@ -144,6 +170,6 @@ checkDupVar numOfBoxes (ExpRaw pos term env) name =
                   else checkDupVar numOfBoxes dupTerm name *> checkDupVar 0 dupTerm dupName
             checkDupVar n1 inTerm name
         Lam _ e -> checkDupVar numOfBoxes e name
-        Link name -> case M.lookup name env of
+        Reference name -> case M.lookup name env of
           Just exp -> checkThirdRule exp $> numOfBoxes
           Nothing  -> return numOfBoxes
