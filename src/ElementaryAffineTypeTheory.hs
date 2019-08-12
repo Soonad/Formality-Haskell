@@ -1,3 +1,56 @@
+-- This file is an complete port of our type-theory to Haskell. It consists of
+-- elementary affine logic (EAL) with dependent types, self-types and mutual
+-- recursion on the type level. In this small theory, we're able to prove
+-- induction for λ-encoded datatypes, giving us inductive datatypes, like
+-- Agda's and Coq's.
+--
+-- We conjecture this language is consistent, since 1. EAL is terminating,
+-- which should extend to the dependently-typed case, 2. allowing for mutual
+-- recursion at the type level shouldn't change this fact, since, for example,
+-- even the untyped core of this language is terminating, i.e., this fact
+-- doesn't depend on types, allowing us to have more powerful type-level
+-- features. See this Stack Exchange question for a reference:
+-- https://bit.ly/2KEz9a1
+--
+-- The language we're developing, Formality, is a small extension of this
+-- theory, adding pairs, ints and other minor features to it, plus a bunch of
+-- syntax-sugars to make programming easier. The questions that must be
+-- answered, thus, are:
+--
+-- 1. If the type-theory implemented here is consistent, how can we prove it?
+--
+-- 2. If not, then how do could we correctly add dependent & inductive types to EAL?
+--
+-- 3. Is it ok to use affine variables multiple times in types?
+--
+-- 4. Is it ok to disable EAL's stratification checks in types?
+--
+-- 5. Are the type-checking rules here correct (for example, for dups)?
+--
+-- 6. When checking for equality, can we erase duplications and boxes?
+--
+-- 7. Can we have `Type : Type` (for the same reason we have type recursion)?
+--
+-- 8. Can we have Cedille-like heterogeneous equality and casts?
+--
+-- In short, we're looking for the best and simplest way to extend EAL with
+-- dependent types and inductive datatypes, and this is our current solution.
+-- We're heavily inspired by Cedille and Aaron Stump's work, but, instead of
+-- dependent intersections for induction, we use his older, but considerably
+-- simpler, self-types approach, taking advantage of the conjecture that we can
+-- have mutual recursion. If, for some reason, this doesn't work, then we can
+-- fallback to dependent intersections.
+--
+-- Notes:
+--
+-- 1. I'll add a lot comments explaining each part of this file soon, in order
+--    to explain precisely everything we did here and make this as clear as
+--    possible.
+--
+-- 2. This file wasn't very tested and could have mistakes.
+--
+-- 3. The stratification checks are missing and will be added soon.
+
 import Data.Char
 import Data.List
 import Data.Maybe
