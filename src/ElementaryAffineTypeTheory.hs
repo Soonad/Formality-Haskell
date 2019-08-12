@@ -1,4 +1,4 @@
--- This file is an complete port of our type-theory to Haskell. It consists of
+-- This file is a complete port of our type-theory to Haskell. It consists of
 -- elementary affine logic (EAL) with dependent types, self-types and mutual
 -- recursion on the type level. In this small theory, we're able to prove
 -- induction for λ-encoded datatypes, giving us inductive datatypes, like
