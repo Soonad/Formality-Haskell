@@ -19,19 +19,21 @@
 --
 -- 1. If the type-theory implemented here is consistent, how can we prove it?
 --
--- 2. If not, then how do could we correctly add dependent & inductive types to EAL?
+-- 2. If not, how could we correctly add dependent & inductive types to EAL?
 --
--- 3. Is it ok to use affine variables multiple times in types?
+-- 3. Can we have Cedille-like erased (computationally irrelevant) lambdas?
 --
--- 4. Is it ok to disable EAL's stratification checks in types?
+-- 4. Is it ok to use affine variables multiple times in types & erased positions?
 --
--- 5. Are the type-checking rules here correct (for example, for dups)?
+-- 5. Is it ok to disable EAL's stratification checks in types & erased positions?
 --
--- 6. When checking for equality, can we erase duplications and boxes?
+-- 6. Are the type-checking rules here correct (for example, for dups)?
 --
--- 7. Can we have `Type : Type` (for the same reason we have type recursion)?
+-- 7. When checking for equality, can we erase duplications and boxes?
 --
--- 8. Can we have Cedille-like heterogeneous equality and casts?
+-- 8. Can we have `Type : Type` (for the same reason of type-level recursion)?
+--
+-- 9. Can we have Cedille-like heterogeneous equality and casts?
 --
 -- In short, we're looking for the best and simplest way to extend EAL with
 -- dependent types and inductive datatypes, and this is our current solution.
