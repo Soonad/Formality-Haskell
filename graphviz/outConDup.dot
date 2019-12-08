@@ -1,0 +1,57 @@
+graph structs {
+  node [shape=none, fontsize=10,fontname="Courier"]
+
+  n0 [label=<
+  <table bgcolor="orangered" border="1" cellborder="0" cellspacing="0">
+  <tr><td colspan="2" port="L" bgcolor="orangered">0</td></tr>
+  </table>>];
+  n1 [label=<
+  <table bgcolor="orangered" border="1" cellborder="0" cellspacing="0">
+  <tr><td colspan="2" port="L" bgcolor="orangered">1</td></tr>
+  </table>>];
+  n2 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">2</td></tr>
+  </table>>];
+  n3 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">3</td></tr>
+  </table>>];
+  n4 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">4</td></tr>
+  </table>>];
+  n5 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">5</td></tr>
+  </table>>];
+  n6 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="M" bgcolor="lightblue">6</td></tr>
+  <tr><td port="L">L</td><td port="R">R</td></tr>
+  </table>>];
+  n7 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="M" bgcolor="lightblue">7</td></tr>
+  <tr><td port="L">L</td><td port="R">R</td></tr>
+  </table>>];
+  n8 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="M" bgcolor="palegreen">8</td></tr>
+  <tr><td port="L">L</td><td port="R">R</td></tr>
+  </table>>];
+  n9 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="M" bgcolor="palegreen">9</td></tr>
+  <tr><td port="L">L</td><td port="R">R</td></tr>
+  </table>>];
+  n6:M--n4:L[color=black]
+  n7:M--n5:L[color=black]
+  n8:M--n2:L[color=black]
+  n9:M--n3:L[color=black]
+  n8:L--n6:L[color=black]
+  n9:L--n6:R[color=black]
+  n8:R--n7:L[color=black]
+  n9:R--n7:R[color=black]
+
+}

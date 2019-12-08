@@ -1,0 +1,21 @@
+graph structs {
+  node [shape=none, fontsize=10,fontname="Courier"]
+
+  n0 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="M" bgcolor="lightblue">0</td></tr>
+  <tr><td port="L">L</td><td port="R">R</td></tr>
+  </table>>];
+  n1 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">1</td></tr>
+  </table>>];
+  n2 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">2</td></tr>
+  </table>>];
+  n0:M--n0:M[color=red]
+  n1:L--n0:L[color=black]
+  n2:L--n0:R[color=black]
+
+}

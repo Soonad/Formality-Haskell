@@ -1,0 +1,36 @@
+graph structs {
+  node [shape=none, fontsize=10,fontname="Courier"]
+
+  n0 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="M" bgcolor="lightblue">0</td></tr>
+  <tr><td port="L">L</td><td port="R">R</td></tr>
+  </table>>];
+  n1 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="M" bgcolor="palegreen">1</td></tr>
+  <tr><td port="L">L</td><td port="R">R</td></tr>
+  </table>>];
+  n2 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">2</td></tr>
+  </table>>];
+  n3 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">3</td></tr>
+  </table>>];
+  n4 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">4</td></tr>
+  </table>>];
+  n5 [label=<
+  <table bgcolor="lightgrey" border="0" cellborder="1" cellspacing="2">
+  <tr><td colspan="2" port="L" bgcolor="beige">5</td></tr>
+  </table>>];
+  n1:M--n0:M[color=red]
+  n2:L--n0:L[color=black]
+  n3:L--n0:R[color=black]
+  n4:L--n1:L[color=black]
+  n5:L--n1:R[color=black]
+
+}
