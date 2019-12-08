@@ -15,16 +15,16 @@ data Net =
   Net { nodes :: V.Vector Node
       , freed :: [Word64]
       , redex :: [(Word64,Word64)]
-      } deriving (Eq)
+      } deriving (Eq, Show)
 
-instance Show Net where
-  show (Net ws fs rs) = concat $
-      [ intercalate "\n" (showNode <$> (zip [0..] (V.toList ws)))
-      , "\n"
-      , "FREE:", show fs
-      , "\n"
-      , "REDEX:", show rs
-      ]
+--instance Show Net where
+--  show (Net ws fs rs) = concat $
+--      [ intercalate "\n" (showNode <$> (zip [0..] (V.toList ws)))
+--      , "\n"
+--      , "FREE:", show fs
+--      , "\n"
+--      , "REDEX:", show rs
+--      ]
 
 testNodes :: [Node]
 testNodes =
