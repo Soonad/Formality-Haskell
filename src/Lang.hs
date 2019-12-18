@@ -61,10 +61,10 @@ lit = string
 parserTest :: Show a => Parser a -> Text -> IO ()
 parserTest p s = print $ runParserT (runStateT p (Ctx [] 0)) "" s
 
---evalTest :: Parser Term -> Text -> IO ()
---evalTest p s = do
---  let (Right a, b) = runState (runParserT p "" s) (Ctx [] 0)
---  print $ eval a M.empty
+evalTest :: Parser Term -> Text -> IO ()
+evalTest p s = do
+  let Identity (Right (a, b)) = runParserT (runStateT p (Ctx [] 0)) "" s
+  print $ eval a M.empty
 
 name :: Parser Text
 name = do
