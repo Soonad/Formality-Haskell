@@ -9,6 +9,7 @@ import qualified Data.Text                  as T
 import           Data.Void
 
 import           Control.Monad              (void)
+import           Control.Monad.Identity
 import           Control.Monad.State.Strict
 
 import           Text.Megaparsec            hiding (State)
@@ -41,21 +42,29 @@ type Scope = M.Map Name Term
 
 data Ctx = Ctx { binders :: [Text], holeCount :: Int } deriving Show
 
-type Parser = ParsecT Void Text (State Ctx)
+
+type Parser = StateT Ctx (ParsecT Void Text Identity)
+
+-- for `dbg`
+--type Parser = ParsecT Void Text (State Ctx)
+
+--parserTest :: Show a => Parser a -> Text -> IO ()
+--parserTest p s = print $ runState (runParserT p "" s) (Ctx [] 0)
 
 -- space consumer
 sc :: Parser ()
 sc = L.space space1 (L.skipLineComment "//") empty
 
-symbol =  L.symbol sc
+sym = L.symbol sc
+lit = string
 
 parserTest :: Show a => Parser a -> Text -> IO ()
-parserTest p s = print $ runState (runParserT p "" s) (Ctx [] 0)
+parserTest p s = print $ runParserT (runStateT p (Ctx [] 0)) "" s
 
-evalTest :: Parser Term -> Text -> IO ()
-evalTest p s = do
-  let (Right a, b) = runState (runParserT p "" s) (Ctx [] 0)
-  print $ eval a M.empty
+--evalTest :: Parser Term -> Text -> IO ()
+--evalTest p s = do
+--  let (Right a, b) = runState (runParserT p "" s) (Ctx [] 0)
+--  print $ eval a M.empty
 
 name :: Parser Text
 name = do
@@ -72,26 +81,26 @@ refVar = do
     _      -> return $ Ref n
 
 num :: Parser Term
-num = "Number" >> return Num
+num = lit "Number" >> return Num
 
 val :: Parser Term
 val = Val <$> L.decimal
 
 typ :: Parser Term
-typ = "Type" >> return Typ
+typ = lit "Type" >> return Typ
 
 allLam :: Parser Term
 allLam = do
-  bs <- symbol "(" >> binds
+  bs <- sym "(" >> binds
   sc
-  ctor <- (symbol "->" >> return All) <|> (symbol "=>" >> return Lam)
+  ctor <- (sym "->" >> return All) <|> (sym "=>" >> return Lam)
   sc
   body <- expr
   return $ foldr (\(n,t,e) x -> ctor n t x e) body bs
 
   where
     binds :: Parser [(Name, Term, Eras)]
-    binds = (sc >> ")" >> return []) <|> next
+    binds = (sc >> lit ")" >> return []) <|> next
 
     next :: Parser [(Name,Term,Eras)]
     next = do
@@ -99,14 +108,14 @@ allLam = do
       modify (\ctx -> ctx { binders = b : binders ctx })
       sc
       bT <- typeOrHole
-      e <- optional $ (sc >> symbol ",") <|> (sc >> symbol ";")
+      e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
       case e of
         Just ";" -> (do bs <- binds; return $ (b,bT,True) : bs)
         _        -> (do bs <- binds; return $ (b,bT,False) : bs)
 
     typeOrHole :: Parser Term
     typeOrHole = do
-      bT <- (optional $ symbol ":" >> term)
+      bT <- (optional $ sym ":" >> term)
       case bT of
         Just x -> return x
         Nothing -> newHole
@@ -118,7 +127,7 @@ newHole = do
   return $ Hol $ T.pack ("?#" ++ show h)
 
 group :: Parser Term
-group = symbol "(" >> expr <* symbol ")"
+group = between (sym "(") (lit ")") expr
 
 term :: Parser Term
 term = do
@@ -137,17 +146,17 @@ term = do
 
 fun :: Term -> Parser Term
 fun f = do
-  as <- concat <$> (symbol "(" >> args) `sepBy` sc
+  as <- concat <$> some (sym "(" >> args)
   return $ foldl (\t (a,e) -> App t a e) f as
   where
     args :: Parser [(Term, Bool)]
-    args = (sc >> ")" >> return []) <|> next
+    args = (sc >> lit ")" >> return []) <|> next
 
     next :: Parser [(Term, Bool)]
     next = do
       a <- term
       sc
-      e <- optional $ (sc >> symbol ",") <|> (sc >> symbol ";")
+      e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
       case e of
         Just ";"  -> (do as <- args; return $ (a,True) : as)
         _         -> (do as <- args; return $ (a,False) : as)
