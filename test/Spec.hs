@@ -6,8 +6,7 @@ import           Data.Word
 import           Test.Hspec
 import           Test.QuickCheck
 
-import           Runtime.INet
-import           Runtime.INode
+import           Runtime.Net
 
 instance Arbitrary NType where
   arbitrary = arbitraryBoundedEnum
