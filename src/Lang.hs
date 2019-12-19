@@ -62,7 +62,6 @@ sc = L.space space1 (L.skipLineComment "//") empty
 sym = L.symbol sc
 lit = string
 
-
 evalTest :: Parser Term -> Text -> IO ()
 evalTest p s = do
   let Identity (Right (a, b)) = runParserT (runStateT p (Ctx [] 0)) "" s
@@ -109,21 +108,28 @@ allLam = do
 
     next :: Parser [(Name,Term,Eras)]
     next = do
-      b <- maybe "_" id <$> (optional name)
-      modify (\ctx -> ctx { binders = b : binders ctx })
-      sc
-      bT <- typeOrHole
+      (b, bT) <- binderAndType
       e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
       case e of
         Just ";" -> (do bs <- binds; return $ (b,bT,True) : bs)
         _        -> (do bs <- binds; return $ (b,bT,False) : bs)
 
-    typeOrHole :: Parser Term
-    typeOrHole = do
-      bT <- (optional $ sym ":" >> term)
-      case bT of
-        Just x -> return x
-        Nothing -> newHole
+    binderAndType :: Parser (Name, Term)
+    binderAndType = do
+      b <- optional name
+      case b of
+        Just n -> do
+          modify (\ctx -> ctx { binders = n : binders ctx })
+          sc
+          bT <- (optional $ sym ":" >> term)
+          case bT of
+            Just x -> return (n,x)
+            Nothing -> (\x -> (n,x)) <$> newHole
+
+        Nothing -> do
+          let b = "_"
+          bT <- sym ":" >> term
+          return (b,bT)
 
 newHole :: Parser Term
 newHole = do
