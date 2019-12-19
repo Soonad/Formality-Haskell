@@ -60,4 +60,8 @@ test-suite test
     , mtl
   default-extensions: OverloadedStrings, MultiWayIf
   other-modules: Runtime.Net
+                , Spec.Lang
+                , Spec.Net
+                , Core
+                , Lang
 

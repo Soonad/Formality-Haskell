@@ -1,3 +1,5 @@
+
+
 module Lang where
 
 import           Data.Char
@@ -43,7 +45,6 @@ type Scope = M.Map Name Term
 
 data Ctx = Ctx { binders :: [Text], holeCount :: Int } deriving Show
 
-
 type Parser = StateT Ctx (ParsecT Void Text Identity)
 
 parserTest :: Show a => Parser a -> Text -> IO ()
@@ -69,9 +70,10 @@ evalTest p s = do
 
 name :: Parser Text
 name = do
-  n  <- letterChar <|> satisfy (\x -> x == '_')
+  us <- many (lit "_")
+  n  <- if us == [] then letterChar else alphaNumChar
   ns <- many (alphaNumChar <|> satisfy (\x -> elem x nameSymbol))
-  return $ T.pack (n : ns)
+  return $ T.concat [T.concat us, T.pack (n : ns)]
   where
     nameSymbol :: [Char]
     nameSymbol = "_.#-@/'"
@@ -135,7 +137,7 @@ newHole :: Parser Term
 newHole = do
   h <- gets holeCount
   modify (\ctx -> ctx { holeCount = (holeCount ctx) + 1 })
-  return $ Hol $ T.pack ("?#" ++ show h)
+  return $ Hol $ T.pack ("#" ++ show h)
 
 group :: Parser Term
 group = between (sym "(") (lit ")") expr

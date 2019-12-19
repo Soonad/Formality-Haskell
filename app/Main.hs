@@ -16,7 +16,7 @@ import           Lang
 
 process :: Text -> IO ()
 process line = do
-  let res = runParserT (runStateT expr (Ctx [] 0)) "" line
+  let res = runParserT (runStateT (expr <* eof) (Ctx [] 0)) "" line
   case res of
     (Identity (Left e))      -> print e
     (Identity (Right (a,b))) -> do
