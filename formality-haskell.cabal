@@ -36,6 +36,10 @@ executable fm
     , text
     , vector
     , process
+    , haskeline
+  other-modules: Core
+                 Lang
+  default-extensions: OverloadedStrings, MultiWayIf
   hs-source-dirs: app src
 
 test-suite test

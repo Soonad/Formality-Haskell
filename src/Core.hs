@@ -103,7 +103,7 @@ eval term defs = case term of
     Val n -> Val $ op o a n
     x     -> Op1 o a x
   Op2 o a b   -> case eval a defs of
-    Val n -> Op1 o n b
+    Val n -> eval (Op1 o n b) defs
     x     -> Op2 o x b
   Ite c t f   -> case eval c defs of
     Val n -> if n > 0 then eval t defs else eval f defs
@@ -121,6 +121,5 @@ op o a b = case o of
   DIV -> a `div` b
   MOD -> a `mod` b
   --POW -> a ^ b
-
 
 

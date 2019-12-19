@@ -13,6 +13,7 @@ import           Control.Monad.Identity
 import           Control.Monad.State.Strict
 
 import           Text.Megaparsec            hiding (State)
+import           Text.Megaparsec.Debug
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
@@ -45,9 +46,12 @@ data Ctx = Ctx { binders :: [Text], holeCount :: Int } deriving Show
 
 type Parser = StateT Ctx (ParsecT Void Text Identity)
 
+parserTest :: Show a => Parser a -> Text -> IO ()
+parserTest p s = print $ runParserT (runStateT p (Ctx [] 0)) "" s
+
 -- for `dbg`
 --type Parser = ParsecT Void Text (State Ctx)
-
+--
 --parserTest :: Show a => Parser a -> Text -> IO ()
 --parserTest p s = print $ runState (runParserT p "" s) (Ctx [] 0)
 
@@ -58,8 +62,6 @@ sc = L.space space1 (L.skipLineComment "//") empty
 sym = L.symbol sc
 lit = string
 
-parserTest :: Show a => Parser a -> Text -> IO ()
-parserTest p s = print $ runParserT (runStateT p (Ctx [] 0)) "" s
 
 evalTest :: Parser Term -> Text -> IO ()
 evalTest p s = do
@@ -69,8 +71,11 @@ evalTest p s = do
 name :: Parser Text
 name = do
   n  <- letterChar <|> satisfy (\x -> x == '_')
-  ns <- many (alphaNumChar <|> satisfy (\x -> elem x ['_','.','#','-','@','/']))
+  ns <- many (alphaNumChar <|> satisfy (\x -> elem x nameSymbol))
   return $ T.pack (n : ns)
+  where
+    nameSymbol :: [Char]
+    nameSymbol = "_.#-@/'"
 
 refVar :: Parser Term
 refVar = do
@@ -104,7 +109,7 @@ allLam = do
 
     next :: Parser [(Name,Term,Eras)]
     next = do
-      b <- name
+      b <- maybe "_" id <$> (optional name)
       modify (\ctx -> ctx { binders = b : binders ctx })
       sc
       bT <- typeOrHole
@@ -129,18 +134,53 @@ newHole = do
 group :: Parser Term
 group = between (sym "(") (lit ")") expr
 
+slf :: Parser Term
+slf = do
+  sym "${"
+  n <- name <* sc
+  modify (\ctx -> ctx { binders = n : binders ctx })
+  sym "}"
+  t <- term
+  return $ Slf n t
+
+new :: Parser Term
+new = do
+  sym "new("
+  ty <- term <* sc
+  sym ")"
+  ex <- term
+  return $ New ty ex
+
+use :: Parser Term
+use = do
+  sym "use("
+  ex <- term <* sc
+  sym ")"
+  return $ Use ex
+
+hol :: Parser Term
+hol = do
+  sym "?"
+  n <- name
+  return $ Hol n
+
 term :: Parser Term
 term = do
   t <- choice
       [ try $ allLam
       , try $ typ
       , try $ num
+      , try $ slf
+      , try $ new
+      , try $ use
+      , try $ hol
       , try $ val
       , try $ refVar
       , try $ group
       ]
   choice
-    [try $ fun t
+    [ try $ fun t
+    , try $ opr t
     , return t
     ]
 
@@ -160,6 +200,31 @@ fun f = do
       case e of
         Just ";"  -> (do as <- args; return $ (a,True) : as)
         _         -> (do as <- args; return $ (a,False) : as)
+
+opName :: Parser Text
+opName = do
+  n  <- satisfy (\x -> elem x opInitSymbol)
+  ns <- many (alphaNumChar <|> satisfy (\x -> elem x opSymbol))
+  return $ T.pack (n : ns)
+  where
+    opInitSymbol :: [Char]
+    opInitSymbol = "!$%&*+./<=>/^|~-"
+    opSymbol :: [Char]
+    opSymbol = "!#$%&*+./<=>?@/^|~"
+
+opr :: Term -> Parser Term
+opr x = do
+  sc
+  op <- opName
+  sc
+  y <- term
+  case op of
+    "->" -> return $ All "_" x y False
+    "::" -> return $ Ann x y False
+    "+"  -> return $ Op2 ADD x y
+    "-"  -> return $ Op2 SUB x y
+    "*"  -> return $ Op2 MUL x y
+    f    -> return $ App (App (Ref f) x False) y False
 
 expr :: Parser Term
 expr = do
