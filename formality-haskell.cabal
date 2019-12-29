@@ -36,7 +36,7 @@ executable fm
     , text
     , vector
     , process
-    , haskeline
+    , repline
   other-modules: Core
                  Lang
   default-extensions: OverloadedStrings, MultiWayIf

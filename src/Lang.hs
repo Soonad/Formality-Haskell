@@ -1,5 +1,3 @@
-
-
 module Lang where
 
 import           Data.Char
@@ -20,26 +18,6 @@ import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
 import           Core
-
-{-
-term :=
-  | Var = <string>
-  | Typ = Type
-  | All = (x : A) -> B
-  | App = f(a)
-  | Slf = ${a}
-  | New = new(a) b
-  | Use = use(a)(b)
-  | Num = Number
-  | Val = <int>
-  | Op1 = +(x)
-  | Op2 = +(x,y)
-  | Ite = c ? t : f
-  | Ann = a :: A
-  | Log = log(a) b
-  | Hol = ?a
-  | Ref = <name>
--}
 
 type Scope = M.Map Name Term
 
@@ -97,41 +75,40 @@ typ = lit "Type" >> return Typ
 
 allLam :: Parser Term
 allLam = do
-  bs <- sym "(" >> binds
+  bs <- binds
   sc
   ctor <- (sym "->" >> return All) <|> (sym "=>" >> return Lam)
   sc
   body <- expr
   return $ foldr (\(n,t,e) x -> ctor n t x e) body bs
 
+binds :: Parser [(Name, Term, Eras)]
+binds = sym "(" >> go
   where
-    binds :: Parser [(Name, Term, Eras)]
-    binds = (sc >> lit ")" >> return []) <|> next
+    go = (sc >> lit ")" >> return []) <|> next
 
     next :: Parser [(Name,Term,Eras)]
     next = do
       (b, bT) <- binderAndType
       e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
       case e of
-        Just ";" -> (do bs <- binds; return $ (b,bT,True) : bs)
-        _        -> (do bs <- binds; return $ (b,bT,False) : bs)
+        Just ";" -> (do bs <- go; return $ (b,bT,True) : bs)
+        _        -> (do bs <- go; return $ (b,bT,False) : bs)
 
     binderAndType :: Parser (Name, Term)
     binderAndType = do
       b <- optional name
       case b of
         Just n -> do
+          bT <- sc >> (optional $ sym ":" >> term)
           modify (\ctx -> ctx { binders = n : binders ctx })
-          sc
-          bT <- (optional $ sym ":" >> term)
           case bT of
             Just x -> return (n,x)
             Nothing -> (\x -> (n,x)) <$> newHole
 
         Nothing -> do
-          let b = "_"
           bT <- sym ":" >> term
-          return (b,bT)
+          return ("_",bT)
 
 newHole :: Parser Term
 newHole = do
@@ -152,25 +129,20 @@ slf = do
   return $ Slf n t
 
 new :: Parser Term
-new = do
-  sym "new("
-  ty <- term <* sc
-  sym ")"
-  ex <- term
-  return $ New ty ex
+new = do sym "new("; ty <- term <* sc; sym ")"; ex <- term; return $ New ty ex
 
 use :: Parser Term
-use = do
-  sym "use("
-  ex <- term <* sc
-  sym ")"
-  return $ Use ex
+use = do sym "use("; ex <- term <* sc; sym ")"; return $ Use ex;
+
+ite :: Parser Term
+ite = do
+  c <- sym "if"   >> term <* sc
+  t <- sym "then" >> term <* sc
+  f <- sym "else" >> term <* sc
+  return $ Ite c t f
 
 hol :: Parser Term
-hol = do
-  sym "?"
-  n <- name
-  return $ Hol n
+hol = do n <- sym "?" >> name; return $ Hol n
 
 term :: Parser Term
 term = do
@@ -181,6 +153,7 @@ term = do
       , try $ slf
       , try $ new
       , try $ use
+      , try $ ite
       , try $ hol
       , try $ val
       , try $ refVar
@@ -194,20 +167,19 @@ term = do
 
 fun :: Term -> Parser Term
 fun f = do
-  as <- concat <$> some (sym "(" >> args)
+  as <- concat <$> some args
   return $ foldl (\t (a,e) -> App t a e) f as
-  where
-    args :: Parser [(Term, Bool)]
-    args = (sc >> lit ")" >> return []) <|> next
 
-    next :: Parser [(Term, Bool)]
+args :: Parser [(Term, Bool)]
+args = sym "(" >> go
+  where
+    go   = (sc >> lit ")" >> return []) <|> next
     next = do
-      a <- term
-      sc
+      a <- term <* sc
       e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
       case e of
-        Just ";"  -> (do as <- args; return $ (a,True) : as)
-        _         -> (do as <- args; return $ (a,False) : as)
+        Just ";"  -> (do as <- go; return $ (a,True) : as)
+        _         -> (do as <- go; return $ (a,False) : as)
 
 opName :: Parser Text
 opName = do
@@ -216,9 +188,9 @@ opName = do
   return $ T.pack (n : ns)
   where
     opInitSymbol :: [Char]
-    opInitSymbol = "!$%&*+./<=>/^|~-"
+    opInitSymbol = "!$%&*+./<=>/^|~-:"
     opSymbol :: [Char]
-    opSymbol = "!#$%&*+./<=>?@/^|~"
+    opSymbol = "!#$%&*+./<=>?@/^|~:"
 
 opr :: Term -> Parser Term
 opr x = do
@@ -227,8 +199,8 @@ opr x = do
   sc
   y <- term
   case op of
-    "->" -> return $ All "_" x y False
     "::" -> return $ Ann x y False
+    "->" -> return $ All "_" x y False
     "+"  -> return $ Op2 ADD x y
     "-"  -> return $ Op2 SUB x y
     "*"  -> return $ Op2 MUL x y
@@ -238,5 +210,22 @@ expr :: Parser Term
 expr = do
   ts <- term `sepEndBy1` sc
   return $ foldl1 (\x y -> App x y False) ts
+
+def :: Parser (Name, Term)
+def = do
+  n  <- name
+  bs <- optional binds <* sc
+  t  <- optional $ sym ":" >> term <* sc
+  d  <- expr
+  case (bs, t) of
+    (Nothing, Nothing) -> return (n, d)
+    (Nothing, Just t)  -> return $ (n, Ann t d False)
+    (Just bs, Nothing) -> return $ (n, foldr (\(n,t,e) x -> Lam n t x e) d bs)
+    (Just bs, Just t) -> 
+      let typ = foldr (\(n,t,e) x -> All n t x e) t bs
+          trm = foldr (\(n,t,e) x -> Lam n t x e) d bs
+       in return $ (n, Ann typ trm False)
+
+
 
 

@@ -67,6 +67,12 @@ spec = do
       eval' allLam "(:Type, :Type) -> A" `shouldBe` 
         (Just $ All "_" Typ (All "_" Typ (Ref "A") False) False)
 
+    it "correct deBruijn indices" $ do
+      eval' allLam "(A : Type, x : A) -> A" `shouldBe` 
+        (Just $ (All "A" Typ (All "x" (Var 0) (Var 1) False) False))
+      eval' allLam "(A : Type, B : Type, x : A) -> A" `shouldBe` 
+        (Just $ (All "A" Typ (All "B" Typ (All "x" (Var 1) (Var 2) False) False) False))
+
   describe "Application" $ do
     it "function style applications: f(a)" $ do
       eval' expr "f(a)" `shouldBe` (Just (App (Ref "f") (Ref "a") False))
