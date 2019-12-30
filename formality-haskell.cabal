@@ -37,8 +37,10 @@ executable fm
     , vector
     , process
     , repline
+    , haskeline
   other-modules: Core
                  Lang
+                 Fide
   default-extensions: OverloadedStrings, MultiWayIf
   hs-source-dirs: app src
 
