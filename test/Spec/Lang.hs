@@ -93,13 +93,14 @@ spec = do
     it "applying a lambda: ((x) => x)(a,b)" $ do
       eval' expr "((x) => x)(a,b)" `shouldBe` 
         (Just (App (App (Lam "x" (Hol "#0") (Var 0) False) (Ref "a") False) (Ref "b") False))
-    it "lambda style applications: f a b c" $ do
-      eval' expr "f a b c" `shouldBe`
-        (Just (App (App (App (Ref "f") (Ref "a") False) (Ref "b") False) (Ref "c") False))
-    it "lambda style applications: f (a b) c" $ do
-      eval' expr "f (a b) c" `shouldBe`
-        (Just (App (App (Ref "f") (App (Ref "a") (Ref "b") False) False) (Ref "c") False))
-      eval' expr "f (a (b c))" `shouldBe`
-        (Just (App (Ref "f") (App (Ref "a") (App (Ref "b") (Ref "c") False) False) False))
+    --it "lambda style applications: f a b c" $ do
+    --  eval' expr "f a b c" `shouldBe`
+    --    (Just (App (App (App (Ref "f") (Ref "a") False) (Ref "b") False) (Ref "c") False))
+    --it "lambda style applications: f (a b) c" $ do
+    --  eval' expr "f (a b) c" `shouldBe`
+    --    (Just (App (App (Ref "f") (App (Ref "a") (Ref "b") False) False) (Ref "c") False))
+    --  eval' expr "f (a (b c))" `shouldBe`
+    --    (Just (App (Ref "f") (App (Ref "a") (App (Ref "b") (Ref "c") False) False) False))
 
+--  describe "Def" $ do
 

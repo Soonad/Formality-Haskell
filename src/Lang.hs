@@ -117,7 +117,11 @@ newHole = do
   return $ Hol $ T.pack ("#" ++ show h)
 
 group :: Parser Term
-group = between (sym "(") (lit ")") expr
+group = do
+  sym "("
+  ts <- sc >> sepEndBy1 term sc
+  lit ")"
+  return $ foldl1 (\x y -> App x y False) ts
 
 slf :: Parser Term
 slf = do
@@ -183,19 +187,19 @@ args = sym "(" >> go
 
 opName :: Parser Text
 opName = do
-  n  <- satisfy (\x -> elem x opInitSymbol)
+  n  <- satisfy (\x -> elem x opInitSymbol) 
   ns <- many (alphaNumChar <|> satisfy (\x -> elem x opSymbol))
   return $ T.pack (n : ns)
   where
     opInitSymbol :: [Char]
-    opInitSymbol = "!$%&*+./<=>/^|~-:"
+    opInitSymbol = "!$%&*+./<=>/^|~-"
     opSymbol :: [Char]
-    opSymbol = "!#$%&*+./<=>?@/^|~:"
+    opSymbol = "!#$%&*+./<=>?@/^|~"
 
 opr :: Term -> Parser Term
 opr x = do
   sc
-  op <- opName
+  op <- opName <|> sym "::"
   sc
   y <- term
   case op of
@@ -208,14 +212,14 @@ opr x = do
 
 expr :: Parser Term
 expr = do
-  ts <- term `sepEndBy1` sc
+  ts <- some term
   return $ foldl1 (\x y -> App x y False) ts
 
 def :: Parser (Name, Term)
 def = do
-  n  <- name
-  bs <- optional binds <* sc
-  t  <- optional $ sym ":" >> term <* sc
+  n  <- name <* sc
+  bs <- (optional $ binds <* sc)
+  t  <- optional (sym ":" >> term <* sc)
   d  <- expr
   case (bs, t) of
     (Nothing, Nothing) -> return (n, d)
@@ -226,6 +230,10 @@ def = do
           trm = foldr (\(n,t,e) x -> Lam n t x e) d bs
        in return $ (n, Ann typ trm False)
 
-
-
+file :: Parser (M.Map Name Term)
+file = do
+  sc
+  ds <- (sepEndBy1 def sc)
+  eof
+  return $ M.fromList ds
 

@@ -206,7 +206,6 @@ equal a b defs = go (Eql a b)
       Or x y            -> Or (step x) (step y)
       Ret v             -> Ret v
 
-
 data Env = Env 
   { defs :: Defs
   , ctx :: [CtxElem]

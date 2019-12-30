@@ -24,8 +24,11 @@ import           Core
 import           HaskelineT
 import           Lang
 
-type FideState = M.Map Name Term
-type Repl = HaskelineT (StateT FideState IO)
+data FideST = FideST
+  { topDefs :: M.Map Name Term
+  }
+
+type Repl = HaskelineT (StateT FideST IO)
 
 repl :: (Functor m, MonadException m)      -- Terminal monad ( often IO ).
          => HaskelineT m Text              -- ^ prompt function
@@ -59,6 +62,7 @@ quit = outputTxtLn "Goodbye."
 data Command
   = Let Name Term
   | Eval Term
+  | Load FilePath
   | Quit
   | Help
   deriving (Eq, Show)
@@ -68,9 +72,13 @@ parseLine = do
    choice
      [ try $ (sym ":help" <|> sym ":h") >> return Help
      , try $ (sym ":quit" <|> sym ":q") >> return Quit
+     , try $ do (sym ":load" <|> sym ":l"); (Load . T.unpack) <$> filename <* sc
      , try $ do sym ":let"; (n,t) <- def; return $ Let n t
      , Eval <$> expr
      ]
+
+filename :: Parser Text
+filename = takeWhile1P Nothing (\s -> s /= ' ')
 
 process :: Text -> Repl ()
 process line = do
@@ -81,13 +89,21 @@ process line = do
     Right (Help,b)    -> do
       liftIO $ putStrLn "help text fills you with determination "
     Right (Quit,b)    -> abort
+    Right (Load f,b) -> do
+      fileText <- liftIO $ readFile f
+      let res = runParserT (runStateT (file <* eof) (Ctx [] 0)) "" (T.pack fileText)
+      case unId res of
+        Left e      -> liftIO $ print e
+        Right (defs,b) -> do
+          liftIO $ putStrLn $ "Loaded "  ++ f
+          modify $ \s -> s { topDefs = defs }
     Right (Let n t,b) -> do
-      modify $ \s -> M.insert n t s
-      s <- get
+      modify $ \s -> s { topDefs = M.insert n t (topDefs s) }
+      ds <- gets topDefs
       liftIO $ putStr "read: "
       liftIO $ print t
-      let a = eval t s
-      let aT = runCheck (Env s []) (check a)
+      let a = eval t ds
+      let aT = runCheck (Env ds []) (check a)
       case aT of
         Left e -> liftIO $ putStrLn (show e)
         Right aT -> do
@@ -96,11 +112,11 @@ process line = do
           liftIO $ putStr "print: "
           liftIO $ putStrLn $ T.unpack $ T.concat [pretty a, " :: ", pretty aT]
     Right (Eval t ,b) -> do
-      s <- get
+      ds <- gets topDefs
       liftIO $ putStr "read: "
       liftIO $ print t
-      let a = eval t s
-      let aT = runCheck (Env s []) (check a)
+      let a = eval t ds
+      let aT = runCheck (Env ds []) (check a)
       case aT of
         Left e -> liftIO $ putStrLn (show e)
         Right aT -> do
@@ -109,14 +125,29 @@ process line = do
           liftIO $ putStr "print: "
           liftIO $ putStrLn $ T.unpack $ T.concat [pretty a, " :: ", pretty aT]
 
-complete :: CompletionFunc (StateT FideState IO)
-complete (ante, post) = do
-  ns <- gets M.keys
-  let keywords = [":quit", ":help", ":let"]
-  let ns' = T.unpack <$> filter (T.isPrefixOf (T.pack ante)) (keywords ++ ns)
-  return $ (post, simpleCompletion <$> ns')
+complete :: CompletionFunc (StateT FideST IO)
+complete (ante, post)
+  | prefixes [":q ", ":quit ", ":h ", ":help "] p = noCompletion (ante, post)
+  | prefixes [":l ", ":load "] p = completeFilename (ante, post)
+  | prefixes [":let "] p = do
+     ns <- gets (M.keys . topDefs)
+     let f word = T.unpack <$> filter (T.isPrefixOf (T.pack word)) ns
+     completeWord Nothing " " (pure . (map simpleCompletion) . f)  (ante, post)
+  | otherwise = do
+     ns <- gets (M.keys . topDefs)
+     let ks = [":quit", ":help", ":let", ":load"]
+     let f word = T.unpack <$> filter (T.isPrefixOf (T.pack word)) (ks ++ ns)
+     completeWord Nothing " " (pure . (map simpleCompletion) . f)  (ante, post)
+  where
+    p = reverse ante
 
-fide :: StateT FideState IO ()
+prefixes :: [String] -> String -> Bool
+prefixes (p:ps) x = isPrefixOf p x || prefixes ps x
+prefixes [] x = False
+
+
+
+fide :: StateT FideST IO ()
 fide = repl prompt quit process complete ini
   where
     ini = liftIO $ putStrLn
