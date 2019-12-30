@@ -203,7 +203,7 @@ opr x = do
   sc
   y <- term
   case op of
-    "::" -> return $ Ann x y False
+    "::" -> return $ Ann y x False
     "->" -> return $ All "_" x y False
     "+"  -> return $ Op2 ADD x y
     "-"  -> return $ Op2 SUB x y

@@ -65,6 +65,7 @@ data Command
   | Load FilePath
   | Quit
   | Help
+  | Refs
   deriving (Eq, Show)
 
 parseLine :: Parser Command
@@ -72,8 +73,9 @@ parseLine = do
    choice
      [ try $ (sym ":help" <|> sym ":h") >> return Help
      , try $ (sym ":quit" <|> sym ":q") >> return Quit
+     , try $ do sym ":let"; (n,t) <- sc >> def; return $ Let n t
      , try $ do (sym ":load" <|> sym ":l"); (Load . T.unpack) <$> filename <* sc
-     , try $ do sym ":let"; (n,t) <- def; return $ Let n t
+     , try $ do (sym ":refs"); return Refs
      , Eval <$> expr
      ]
 
@@ -86,6 +88,9 @@ process line = do
   let unId (Identity x) = x
   case unId res of
     Left e      -> liftIO $ print e
+    Right (Refs,b)    -> do
+      ds <- gets topDefs
+      liftIO $ print ds
     Right (Help,b)    -> do
       liftIO $ putStrLn "help text fills you with determination "
     Right (Quit,b)    -> abort

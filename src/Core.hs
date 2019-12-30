@@ -112,10 +112,10 @@ eval term defs = case term of
   Ite c t f   -> case eval c defs of
     Val n -> if n > 0 then eval t defs else eval f defs
     x     -> Ite x (eval t defs) (eval f defs)
-  Ann t x d   -> eval t defs
+  Ann t x d   -> eval x defs
   Log m x     -> Log (eval m defs) (eval x defs)
   Hol n       -> Hol n
-  Ref n     -> maybe (Ref n) (\x -> eval x defs) $ M.lookup n defs
+  Ref n       -> maybe (Ref n) (\x -> eval x defs) $ M.lookup n defs
 
 op :: Op -> Int -> Int -> Int
 op o a b = case o of
@@ -319,8 +319,8 @@ check term = case term of
   --Log
   --Hol
   Ref n -> do
-    d <- asks defs
-    return $ d M.! n
+    ds <- asks defs
+    return $ maybe (Ref n) (\x -> eval x ds) $ M.lookup n ds
   Ann t x d -> do
     xT <- check x
     match t xT >> return t
