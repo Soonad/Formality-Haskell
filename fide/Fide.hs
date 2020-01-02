@@ -108,6 +108,13 @@ process line = do
       ds <- gets topDefs
       liftIO $ putStr "read: "
       liftIO $ print t
+      let tT = checkTerm t
+      case tT of
+        (Left e, st, logs) -> do
+          liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
+          liftIO $ putStr "ERROR: " >> putStrLn (show e)
+        (Right tT, st, logs) -> do
+          liftIO $ putStrLn $ T.unpack $ T.concat [pretty t, " :: ", pretty tT]
       let a = eval t ds
       let aT = checkTerm a
       case aT of
@@ -123,6 +130,13 @@ process line = do
       ds <- gets topDefs
       liftIO $ putStr "read: "
       liftIO $ print t
+      let tT = checkTerm t
+      case tT of
+        (Left e, st, logs) -> do
+          liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
+          liftIO $ putStr "ERROR: " >> putStrLn (show e)
+        (Right tT, st, logs) -> do
+          liftIO $ putStrLn $ T.unpack $ T.concat [pretty t, " :: ", pretty tT]
       let a = eval t ds
       let aT = checkTerm a
       case aT of
