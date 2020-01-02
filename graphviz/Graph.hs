@@ -83,4 +83,3 @@ edges vs = Set.toList $ V.ifoldr insertRedex Set.empty vs
          | Set.member (Edge sB iB sA iA) set = s
          | otherwise = Set.insert n s
 
-

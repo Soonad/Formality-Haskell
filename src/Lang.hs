@@ -1,5 +1,7 @@
 module Lang where
 
+import           Prelude                    hiding (log)
+
 import           Data.Char
 import           Data.List                  hiding (group)
 import qualified Data.Map.Strict            as M
@@ -13,11 +15,13 @@ import           Control.Monad.Identity
 import           Control.Monad.State.Strict
 
 import           Text.Megaparsec            hiding (State)
-import           Text.Megaparsec.Debug
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
+import           Text.Megaparsec.Debug
 
+import           Check
 import           Core
+import           Pretty
 
 type Scope = M.Map Name Term
 
@@ -138,6 +142,9 @@ new = do sym "new("; ty <- term <* sc; sym ")"; ex <- term; return $ New ty ex
 use :: Parser Term
 use = do sym "use("; ex <- term <* sc; sym ")"; return $ Use ex;
 
+log :: Parser Term
+log = do sym "log("; msge <- term <* sc; sym ")"; Log msge <$> term
+
 ite :: Parser Term
 ite = do
   c <- sym "if"   >> term <* sc
@@ -156,6 +163,7 @@ term = do
       , try $ num
       , try $ slf
       , try $ new
+      , try $ log
       , try $ use
       , try $ ite
       , try $ hol
@@ -203,7 +211,7 @@ opr x = do
   sc
   y <- term
   case op of
-    "::" -> return $ Ann y x False
+    "::" -> return $ Ann y x
     "->" -> return $ All "_" x y False
     "+"  -> return $ Op2 ADD x y
     "-"  -> return $ Op2 SUB x y
@@ -223,12 +231,12 @@ def = do
   d  <- expr
   case (bs, t) of
     (Nothing, Nothing) -> return (n, d)
-    (Nothing, Just t)  -> return $ (n, Ann t d False)
+    (Nothing, Just t)  -> return $ (n, Ann t d)
     (Just bs, Nothing) -> return $ (n, foldr (\(n,t,e) x -> Lam n t x e) d bs)
     (Just bs, Just t) -> 
       let typ = foldr (\(n,t,e) x -> All n t x e) t bs
           trm = foldr (\(n,t,e) x -> Lam n t x e) d bs
-       in return $ (n, Ann typ trm False)
+       in return $ (n, Ann typ trm)
 
 file :: Parser (M.Map Name Term)
 file = do

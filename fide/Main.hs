@@ -18,5 +18,3 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 main :: IO ()
 main = evalStateT fide (FideST M.empty)
-
-

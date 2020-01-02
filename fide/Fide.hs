@@ -1,5 +1,6 @@
 module Fide where
 
+import           Control.Applicative
 import           Control.Monad.Identity
 import           Control.Monad.State.Strict
 import           Control.Monad.Trans
@@ -17,12 +18,11 @@ import qualified System.Console.Haskeline                as H
 import           System.Console.Haskeline.Completion
 import           System.Console.Haskeline.MonadException
 
-import           Control.Applicative
-import           Data.List                               (isPrefixOf)
-
+import           Check
 import           Core
 import           HaskelineT
 import           Lang
+import           Pretty
 
 data FideST = FideST
   { topDefs :: M.Map Name Term
@@ -76,6 +76,7 @@ parseLine = do
      , try $ do sym ":let"; (n,t) <- sc >> def; return $ Let n t
      , try $ do (sym ":load" <|> sym ":l"); (Load . T.unpack) <$> filename <* sc
      , try $ do (sym ":refs"); return Refs
+     , try $ do (n,t) <- sc >> def; return $ Let n t
      , Eval <$> expr
      ]
 
@@ -108,10 +109,12 @@ process line = do
       liftIO $ putStr "read: "
       liftIO $ print t
       let a = eval t ds
-      let aT = runCheck (Env ds []) (check a)
+      let aT = checkTerm a
       case aT of
-        Left e -> liftIO $ putStrLn (show e)
-        Right aT -> do
+        (Left e, st, logs) -> do
+          liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
+          liftIO $ putStr "ERROR: " >> putStrLn (show e)
+        (Right aT, st, logs) -> do
           liftIO $ putStr "eval: "
           liftIO $ print a
           liftIO $ putStr "print: "
@@ -121,10 +124,12 @@ process line = do
       liftIO $ putStr "read: "
       liftIO $ print t
       let a = eval t ds
-      let aT = runCheck (Env ds []) (check a)
+      let aT = checkTerm a
       case aT of
-        Left e -> liftIO $ putStrLn (show e)
-        Right aT -> do
+        (Left e, st, logs) -> do
+          liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
+          liftIO $ putStr "ERROR: " >> putStrLn (show e)
+        (Right aT, st, logs) -> do
           liftIO $ putStr "eval: "
           liftIO $ print a
           liftIO $ putStr "print: "
@@ -150,13 +155,10 @@ prefixes :: [String] -> String -> Bool
 prefixes (p:ps) x = isPrefixOf p x || prefixes ps x
 prefixes [] x = False
 
-
-
 fide :: StateT FideST IO ()
 fide = repl prompt quit process complete ini
   where
     ini = liftIO $ putStrLn
       "Welcome to Fide, the Formality interactive development environment!"
-
 
 
