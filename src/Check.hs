@@ -12,7 +12,6 @@ import Control.Monad.Except
 
 import Core
 
-data IsEq = Eql Term Term | And IsEq IsEq | Or IsEq IsEq | Ret Bool
 
 erase :: Term -> Term
 erase term = case term of
@@ -31,52 +30,6 @@ erase term = case term of
   Log m x         -> Log (erase m) (erase x)
   _ -> term
 
---data EqualEnv = EqualEnv
---  { 
-
-equal :: Term -> Term -> Defs -> Bool
-equal a b defs = go (Eql a b)
-  where
-    go t = case t of
-      Ret v -> v
-      _ -> go (step t)
-
-    step t = case t of
-      Eql a b -> let
-        ex = case (eval a M.empty, eval b M.empty) of
-          (Ref aN, Ref bN) -> if aN == bN then Just (Ret True) else Nothing
-          (App aF aA _, App bF bA _) -> Just (And (Eql aF bF) (Eql aA bA))
-          _ -> Nothing
-        ey = case (eval a defs, eval b defs) of
-          (Var i, Var j) -> Ret $ i == j
-          (Typ, Typ) -> Ret True
-          (All _ aH aB _, All _ bH bB _) -> And (Eql aH bH) (Eql aB bB)
-          (Lam _ aH aB _, Lam _ bH bB _) -> Eql aB bB
-          (App aF aA _, App bF bA _)     -> And (Eql aF bF) (Eql aA bA)
-          (Slf _ aT, Slf _ bT)           -> Eql aT bT
-          (New _ aX, New _ bX)           -> Eql aX bX
-          (Use aX, Use bX)               -> Eql aX bX
-          (Num, Num)                     -> Ret True
-          (Val i, Val j)                 -> Ret $ i == j
-          (Op1 aO aX aY, Op1 bO bX bY)   ->
-            if aO /= bO then Ret False else And (Ret $ aX == bX) (Eql aY bY)
-          (Op2 aO aX aY, Op2 bO bX bY)   ->
-            if aO /= bO then Ret False else And (Eql aX bX) (Eql aY bY)
-          (Ite aC aT aF, Ite bC bT bF)   -> And (Eql aC bC) (Eql aT bT)
-          (Ann aT aV, Ann bT bV)         -> Eql aV bV
-          _                              -> Ret False
-        in maybe ey (\x -> Or x ey) ex
-      And (Ret False) _ -> Ret False
-      And (Ret True) y  -> y
-      And _ (Ret False) -> Ret False
-      And x (Ret True)  -> x
-      And x y  -> And (step x) (step y)
-      Or (Ret True) y   -> Ret True
-      Or (Ret False) y  -> y
-      Or x (Ret True)   -> Ret True
-      Or x (Ret False)  -> x
-      Or x y            -> Or (step x) (step y)
-      Ret v             -> Ret v
 
 data Env = Env
   { _defs     :: Defs
@@ -91,8 +44,6 @@ data CtxElem = CtxElem
   , _eras :: Bool
   } deriving Show
 
-
-
 extend :: CtxElem -> Env -> Env
 extend c env = env { _ctx = c : (_ctx env) }
 
@@ -104,8 +55,10 @@ getCtx i c
 
 type Logs = [(Term, Term, [CtxElem])]
 
+data Hole = Hole { _value :: Maybe Term , _depth :: Int } deriving Show
+
 data CheckST = CheckST
-  { _holes :: M.Map Name Term
+  { _holes :: M.Map Name Hole
   } deriving Show
 
 data TypeError
@@ -123,17 +76,73 @@ data TypeError
 
 type Check = ExceptT TypeError (RWS Env Logs CheckST)
 
-match :: Term -> Term -> Check ()
-match a b = do
-  d <- asks _defs
-  if equal a b d then return () else do
-    e <- ask
-    throwError $ TypeMismatch a b e
+data IsEq = Eql Term Term | And IsEq IsEq | Or IsEq IsEq | Ret Bool
+
+equal :: Term -> Term -> Check ()
+equal a b = go (Eql a b)
+  where
+    go :: IsEq -> Check ()
+    go t = case t of
+      Ret False -> (TypeMismatch a b <$> ask) >>= throwError
+      Ret True  -> return ()
+      _         -> (step t) >>= go
+
+    step :: IsEq -> Check IsEq
+    step t = case t of
+      Eql a b -> do
+        defs  <- asks _defs
+        holes  <- gets _holes
+        let ex = case (eval a M.empty, eval b M.empty) of
+              (Ref aN, Ref bN) -> if aN == bN then (return $ Just (Ret True))
+                  else return Nothing
+              (Hol aN, Hol bN) -> undefined
+                 --holes <- gets _holes
+                 --case aN M.!? holes of
+                 --  (Just (Hole (Just av) ad)) ->
+                 --  (Just (Hole Nothing ad)) -> 
+                 --  Nothing -> 
+              (Hol aN, b)      -> case holes M.!? aN of
+                Just (Hole (Just v) d) -> undefined
+                Just (Hole Nothing d)  -> undefined
+                Nothing                -> undefined
+              (a, Hol bN)      -> undefined
+              (App aF aA _, App bF bA _) -> return $ Just (And (Eql aF bF) (Eql aA bA))
+              _ -> return Nothing
+        let ey = case (eval a defs, eval b defs) of
+              (Var i, Var j) -> Ret $ i == j
+              (Typ, Typ) -> Ret True
+              (All _ aH aB _, All _ bH bB _) -> And (Eql aH bH) (Eql aB bB)
+              (Lam _ aH aB _, Lam _ bH bB _) -> Eql aB bB
+              (App aF aA _, App bF bA _)     -> And (Eql aF bF) (Eql aA bA)
+              (Slf _ aT, Slf _ bT)           -> Eql aT bT
+              (New _ aX, New _ bX)           -> Eql aX bX
+              (Use aX, Use bX)               -> Eql aX bX
+              (Num, Num)                     -> Ret True
+              (Val i, Val j)                 -> Ret $ i == j
+              (Op1 aO aX aY, Op1 bO bX bY)   ->
+                if aO /= bO then Ret False else And (Ret $ aX == bX) (Eql aY bY)
+              (Op2 aO aX aY, Op2 bO bX bY)   ->
+                if aO /= bO then Ret False else And (Eql aX bX) (Eql aY bY)
+              (Ite aC aT aF, Ite bC bT bF)   -> And (Eql aC bC) (Eql aT bT)
+              (Ann aT aV, Ann bT bV)         -> Eql aV bV
+              _                              -> Ret False
+        (maybe ey (\x -> Or x ey)) <$> ex
+      And (Ret False) _ -> return $ Ret False
+      And (Ret True) y  -> return $ y
+      And _ (Ret False) -> return $ Ret False
+      And x (Ret True)  -> return $ x
+      And x y           -> do x' <- step x; y' <- step y; return $ And x' y'
+      Or (Ret True) y   -> return $ Ret True
+      Or (Ret False) y  -> return $ y
+      Or x (Ret True)   -> return $ Ret True
+      Or x (Ret False)  -> return $ x
+      Or x y            ->  do x' <- step x; y' <- step y; return $ Or x' y'
+      Ret v             -> return $ Ret v
 
 expect :: Term -> Term -> Check Term
 expect t x = do
   xT <- local (\e -> e { _expect = Just t }) (check x)
-  match xT t >> return xT
+  equal xT t >> return xT
 
 erasable :: Check Term -> Check Term
 erasable = local (\e -> e { _erasable = True})
@@ -216,7 +225,13 @@ check term = case term of
     tell [(m, eval (erase mT) ds, ctx)]
     check x
   -- Holes in State monad
-  Hol n -> return $ Hol n
+  Hol n -> do
+    exp <- asks _expect
+    d  <- length <$> (asks _ctx)
+    modify (\s -> s { _holes = M.insert n (Hole Nothing d) (_holes s) } )
+    case exp of
+      Nothing -> return $ Hol (n `T.append` "_type")
+      Just t  -> return t
   Ref n -> do
     ds <- asks _defs
     return $ maybe (Ref n) (\x -> eval x ds) $ M.lookup n ds
