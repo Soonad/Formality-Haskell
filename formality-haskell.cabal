@@ -17,6 +17,7 @@ library
                      Lang
                      Check
                      Pretty
+                     Unify
   build-depends:
     base
     , containers
@@ -25,6 +26,7 @@ library
     , mtl
     , text
     , vector
+    , logict
   default-extensions: OverloadedStrings, MultiWayIf
 
 executable fide

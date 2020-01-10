@@ -9,13 +9,16 @@ import Control.Monad.State
 import Control.Monad.Except
 
 type Name = Text
-type Eras = Bool
+data Eras = Eras
+          | Keep
+          -- | EHol Name
+          deriving (Show, Eq, Ord)
 
 data Term
   = Var Int
   | Typ
-  | All Name Term Term Eras
-  | Lam Name Term Term Eras
+  | All Name Term Eras Term
+  | Lam Name Term Eras Term
   | App Term Term Eras
   | Slf Name Term
   | New Term Term
@@ -40,8 +43,8 @@ shift :: Term -> Int -> Int -> Term
 shift term inc dep = case term of
   Var i        -> Var (if i < dep then i else (i + inc))
   Typ          -> Typ
-  All n h b e  -> All n (shift h inc dep) (shift b inc (dep + 1)) e
-  Lam n h b e  -> Lam n (shift h inc dep) (shift b inc (dep + 1)) e
+  All n h e b  -> All n (shift h inc dep) e (shift b inc (dep + 1))
+  Lam n h e b  -> Lam n (shift h inc dep) e (shift b inc (dep + 1))
   App f a e    -> App (shift f inc dep) (shift a inc dep) e
   Slf n t      -> Slf n (shift t inc (dep + 1))
   New t x      -> New (shift t inc dep) (shift x inc dep)
@@ -62,8 +65,8 @@ subst term v dep =
   case term of
   Var i       -> if i == dep then v else Var (i - if i > dep then 1 else 0)
   Typ         -> Typ
-  All n h b e -> All n (subst h v dep) (subst b v' (dep + 1)) e
-  Lam n h b e -> Lam n (subst h v dep) (subst b v' (dep + 1)) e
+  All n h e b -> All n (subst h v dep) e (subst b v' (dep + 1))
+  Lam n h e b -> Lam n (subst h v dep) e (subst b v' (dep + 1))
   App f a e   -> App (subst f v dep) (subst a v dep) e
   Slf n t     -> Slf n (subst t v' (dep + 1))
   New t x     -> New (subst t v dep) (subst x v dep)
@@ -92,10 +95,10 @@ eval :: Term -> Defs -> Term
 eval term defs = case term of
   Var i       -> Var i
   Typ         -> Typ
-  All n h b e -> All n h b e
-  Lam n h b e -> Lam n h (eval b defs) e
+  All n h e b -> All n h e b
+  Lam n h e b -> Lam n h e (eval b defs)
   App f a e   -> case eval f defs of
-    Lam n' h' b' e' -> eval (subst b' a 0) defs
+    Lam n' h' e b'  -> eval (subst b' a 0) defs
     f               -> App f (eval a defs) e
   Slf n t     -> Slf n t
   New t x     -> eval x defs

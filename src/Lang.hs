@@ -19,7 +19,7 @@ import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Text.Megaparsec.Debug
 
-import           Check
+import           Check hiding (newHole)
 import           Core
 import           Pretty
 
@@ -84,7 +84,7 @@ allLam = do
   ctor <- (sym "->" >> return All) <|> (sym "=>" >> return Lam)
   sc
   body <- expr
-  return $ foldr (\(n,t,e) x -> ctor n t x e) body bs
+  return $ foldr (\(n,t,e) x -> ctor n t e x) body bs
 
 binds :: Parser [(Name, Term, Eras)]
 binds = sym "(" >> go
@@ -96,8 +96,8 @@ binds = sym "(" >> go
       (b, bT) <- binderAndType
       e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
       case e of
-        Just ";" -> (do bs <- go; return $ (b,bT,True) : bs)
-        _        -> (do bs <- go; return $ (b,bT,False) : bs)
+        Just ";" -> (do bs <- go; return $ (b,bT,Eras) : bs)
+        _        -> (do bs <- go; return $ (b,bT,Keep) : bs)
 
     binderAndType :: Parser (Name, Term)
     binderAndType = do
@@ -125,7 +125,7 @@ group = do
   sym "("
   ts <- sc >> sepEndBy1 term sc
   lit ")"
-  return $ foldl1 (\x y -> App x y False) ts
+  return $ foldl1 (\x y -> App x y Keep) ts
 
 slf :: Parser Term
 slf = do
@@ -182,7 +182,7 @@ fun f = do
   as <- concat <$> some args
   return $ foldl (\t (a,e) -> App t a e) f as
 
-args :: Parser [(Term, Bool)]
+args :: Parser [(Term, Eras)]
 args = sym "(" >> go
   where
     go   = (sc >> lit ")" >> return []) <|> next
@@ -190,8 +190,8 @@ args = sym "(" >> go
       a <- term <* sc
       e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
       case e of
-        Just ";"  -> (do as <- go; return $ (a,True) : as)
-        _         -> (do as <- go; return $ (a,False) : as)
+        Just ";"  -> (do as <- go; return $ (a,Eras) : as)
+        _         -> (do as <- go; return $ (a,Keep) : as)
 
 opName :: Parser Text
 opName = do
@@ -212,16 +212,16 @@ opr x = do
   y <- term
   case op of
     "::" -> return $ Ann y x
-    "->" -> return $ All "_" x y False
+    "->" -> return $ All "_" x Keep y
     "+"  -> return $ Op2 ADD x y
     "-"  -> return $ Op2 SUB x y
     "*"  -> return $ Op2 MUL x y
-    f    -> return $ App (App (Ref f) x False) y False
+    f    -> return $ App (App (Ref f) x Keep) y Keep
 
 expr :: Parser Term
 expr = do
   ts <- some term
-  return $ foldl1 (\x y -> App x y False) ts
+  return $ foldl1 (\x y -> App x y Keep) ts
 
 def :: Parser (Name, Term)
 def = do
@@ -232,10 +232,10 @@ def = do
   case (bs, t) of
     (Nothing, Nothing) -> return (n, d)
     (Nothing, Just t)  -> return $ (n, Ann t d)
-    (Just bs, Nothing) -> return $ (n, foldr (\(n,t,e) x -> Lam n t x e) d bs)
+    (Just bs, Nothing) -> return $ (n, foldr (\(n,t,e) x -> Lam n t e x) d bs)
     (Just bs, Just t) -> 
-      let typ = foldr (\(n,t,e) x -> All n t x e) t bs
-          trm = foldr (\(n,t,e) x -> Lam n t x e) d bs
+      let typ = foldr (\(n,t,e) x -> All n t e x) t bs
+          trm = foldr (\(n,t,e) x -> Lam n t e x)  d bs
        in return $ (n, Ann typ trm)
 
 file :: Parser (M.Map Name Term)
