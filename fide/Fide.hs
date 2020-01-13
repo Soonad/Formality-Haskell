@@ -103,12 +103,13 @@ process line = do
         Right (defs,b) -> do
           liftIO $ putStrLn $ "Loaded "  ++ f
           modify $ \s -> s { topDefs = defs }
-    Right (Let n t,b) -> do
+    Right (Let n t, b) -> do
       modify $ \s -> s { topDefs = M.insert n t (topDefs s) }
       ds <- gets topDefs
-      liftIO $ putStr "read: "
+      liftIO $ putStr "Read: "
       liftIO $ print t
-      let tT = checkTerm t
+      --liftIO $ putStrLn $ T.unpack $ pretty t
+      let tT = checkTermWithDefs ds t
       case tT of
         (Left e, st, logs) -> do
           liftIO $ putStr "ERROR: " >> putStrLn (show e)
@@ -116,23 +117,23 @@ process line = do
         (Right tT, st, logs) -> do
           liftIO $ putStrLn $ T.unpack $ T.concat [pretty t, " :: ", pretty tT]
           liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
+      liftIO $ putStr "Eval: "
       let a = eval t ds
-      let aT = checkTerm a
+      let aT = checkTermWithDefs ds a
       case aT of
         (Left e, st, logs) -> do
           liftIO $ putStr "ERROR: " >> putStrLn (show e)
           liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
         (Right aT, st, logs) -> do
-          liftIO $ putStr "eval: "
           liftIO $ print a
-          liftIO $ putStr "print: "
+          liftIO $ putStr "Print: "
           liftIO $ putStrLn $ T.unpack $ T.concat [pretty a, " :: ", pretty aT]
           liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
     Right (Eval t ,b) -> do
       ds <- gets topDefs
-      liftIO $ putStr "read: "
+      liftIO $ putStr "Read: "
       liftIO $ print t
-      let tT = checkTerm t
+      let tT = checkTermWithDefs ds t
       case tT of
         (Left e, st, logs) -> do
           liftIO $ putStr "ERROR: " >> putStrLn (show e)
@@ -140,16 +141,16 @@ process line = do
         (Right tT, st, logs) -> do
           liftIO $ putStrLn $ T.unpack $ T.concat [pretty t, " :: ", pretty tT]
           liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
+      liftIO $ putStr "Eval: "
       let a = eval t ds
-      let aT = checkTerm a
+      let aT = checkTermWithDefs ds a
       case aT of
         (Left e, st, logs) -> do
           liftIO $ putStr "ERROR: " >> putStrLn (show e)
           liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
         (Right aT, st, logs) -> do
-          liftIO $ putStr "eval: "
           liftIO $ print a
-          liftIO $ putStr "print: "
+          liftIO $ putStr "Print: "
           liftIO $ putStrLn $ T.unpack $ T.concat [pretty a, " :: ", pretty aT]
           liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
 

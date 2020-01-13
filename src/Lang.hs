@@ -5,7 +5,7 @@ import           Prelude                    hiding (log)
 import           Data.Char
 import           Data.List                  hiding (group)
 import qualified Data.Map.Strict            as M
-import           Data.Maybe                 (isJust)
+import           Data.Maybe                 (isJust,fromJust)
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import           Data.Void
@@ -195,14 +195,21 @@ args = sym "(" >> go
 
 opName :: Parser Text
 opName = do
-  n  <- satisfy (\x -> elem x opInitSymbol) 
-  ns <- many (alphaNumChar <|> satisfy (\x -> elem x opSymbol))
-  return $ T.pack (n : ns)
+  n  <- satisfy (\x -> elem x opInitSymbol)
+  case elem n opSingleSymbol of 
+    True -> do
+      ns <- many (alphaNumChar <|> satisfy (\x -> elem x opSymbol))
+      return $ T.pack (n : ns)
+    False -> do
+      ns <- some (alphaNumChar <|> satisfy (\x -> elem x opSymbol))
+      return $ T.pack (n : ns)
   where
     opInitSymbol :: [Char]
     opInitSymbol = "!$%&*+./<=>/^|~-"
+    opSingleSymbol :: [Char]
+    opSingleSymbol = "!$%&*+./<>/^|~-"
     opSymbol :: [Char]
-    opSymbol = "!#$%&*+./<=>?@/^|~"
+    opSymbol = "!#$%&*+./<=>?@/^|~-"
 
 opr :: Term -> Parser Term
 opr x = do
@@ -223,11 +230,24 @@ expr = do
   ts <- some term
   return $ foldl1 (\x y -> App x y Keep) ts
 
+
+def' :: Parser Text
+def' = do
+  n  <- name
+  bs <- optional (lit "(b)")
+  sc
+  t  <- optional (lit ":T" <* sc )
+  optional (sym "=")
+  d  <- expr >> return "1"
+  return $ fromJust $ (Just n) <> bs <> t <> (Just d)
+
 def :: Parser (Name, Term)
 def = do
-  n  <- name <* sc
-  bs <- (optional $ binds <* sc)
+  n  <- name
+  bs <- (optional $ binds)
+  sc
   t  <- optional (sym ":" >> term <* sc)
+  optional (sym "=")
   d  <- expr
   case (bs, t) of
     (Nothing, Nothing) -> return (n, d)

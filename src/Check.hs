@@ -51,7 +51,7 @@ data Binder = Binder
 
 data CheckLog = CheckLog
   { _logs        :: [(Term, Term, [Binder])]
-  , _constraints :: Set Constraint
+  , _constraints :: Set PreConstraint
   } deriving Show
 
 instance Semigroup CheckLog where
@@ -61,10 +61,11 @@ instance Monoid CheckLog where
   mappend = (<>)
   mempty = CheckLog mempty mempty
 
-type Constraint = (CheckEnv, Term, Term)
+type PreConstraint = (CheckEnv, Term, Term)
 
 data CheckState = CheckState
   { _holCount  :: Int
+  , _refTypes  :: M.Map Name Term
   --, _eholCount :: Int
   } deriving Show
 
@@ -73,6 +74,7 @@ data CheckError
   | UnboundVariable CheckEnv
   | NotInScope Term
   | ErasureMismatch Term
+  | UndefinedReference Name
   deriving Show
 
 type Check = ExceptT CheckError (RWS CheckEnv CheckLog CheckState)
@@ -174,12 +176,22 @@ check term = case term of
   Hol n -> return $ Hol (n `T.append` "_type")
   Ref n -> do
     ds <- asks _defs
-    return $ maybe (Ref n) (\x -> eval x ds) $ M.lookup n ds
+    rs <- gets _refTypes
+    case (ds M.!? n, rs M.!? n) of
+      (Just t, Just tT) -> return tT
+      (Just t, Nothing) -> do
+        tT <- check t
+        modify (\s -> s { _refTypes = M.insert n tT rs })
+        return tT
+      (Nothing, _) -> throwError $ UndefinedReference n
   Ann t x -> expect t x
 
 runCheck :: CheckEnv -> CheckState -> Check a -> (Either CheckError a, CheckState, CheckLog)
 runCheck env cs = (\x -> runRWS x env cs) . runExceptT
 
 checkTerm :: Term -> (Either CheckError Term, CheckState, CheckLog)
-checkTerm = (runCheck (CheckEnv M.empty [] Keep) (CheckState 0)) . check
+checkTerm = (runCheck (CheckEnv M.empty [] Keep) (CheckState 0 M.empty)) . check
+
+checkTermWithDefs :: M.Map Name Term -> Term -> (Either CheckError Term, CheckState, CheckLog)
+checkTermWithDefs defs = (runCheck (CheckEnv defs [] Keep) (CheckState 0 M.empty)) . check
 

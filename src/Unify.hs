@@ -81,6 +81,25 @@ peelApTelescope t = go t []
 applyApTelescope :: Term -> [Term] -> Term
 applyApTelescope = foldl (\x y -> App x y Keep)
 
+type Constraint = (Term, Term)
+
+-- remove Environment by resolving Defs and [Binders]
+--regularize :: PreConstraint -> Constraint
+--regularize (env, t1, t2) = undefined
+--  where
+--  t1' = unbind (_context env) t1
+--  t2' = unbind (_context env) t2
+--
+--unbind :: [Binder] -> Term -> Term
+--unbind [] x = x
+--unbind ((n,t,e):bs) = unbind bs (Lam n t e x)
+
+-- resolve Defs
+dereference :: Term -> Defs -> Term
+dereference t ds = undefined
+
+
+
 type Subst = M.Map Name Term
 
 data UnifyEnv = UnifyEnv
@@ -96,9 +115,13 @@ data UnifyError
   deriving Show
 
 -- Rigid-Rigid constraint
---simplify :: Constraint -> Unify (Set Constraint)
---simplify (t1, t2)
--- | t1 == t2 && Set.null (holes t1) = return $ Set.empty
+-- simplify :: Constraint -> Unify (Set Constraint)
+-- simplify (env, t1, t2) = do
+--   b <- equal env t1 t2
+--   when b (return $ Set.empty)
+--   case (t1,t2) of
+--     (Var
+--  | t1 == t2 && Set.null (holes t1) = return $ Set.empty
 -- | eval' t1 /= t1 = simplify (eval' t1, t2)
 -- | eval' t2 /= t2 = simplify (t1, eval' t2)
 -- | (Var m, ctxM) <- peelApTelescope t1
@@ -121,7 +144,7 @@ eval' t = eval t M.empty
 
 --data IsEq = Eql Term Term | And IsEq IsEq | Or IsEq IsEq | Ret Bool
 --
---equal :: Term -> Term -> Check ()
+--equal :: Term -> Term -> Unify Bool
 --equal a b = go (Eql a b)
 --  where
 --    go :: IsEq -> Check ()
