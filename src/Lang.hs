@@ -12,25 +12,32 @@ import           Data.Void
 
 import           Control.Monad              (void)
 import           Control.Monad.Identity
-import           Control.Monad.State.Strict
+import           Control.Monad.RWS.Lazy    hiding (All)
 
 import           Text.Megaparsec            hiding (State)
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Text.Megaparsec.Debug
 
-import           Check hiding (newHole)
+import           Check hiding (newHole, _context, binder)
 import           Core
 import           Pretty
 
-type Scope = M.Map Name Term
+--type Scope = M.Map Name Term
 
-data Ctx = Ctx { binders :: [Text], holeCount :: Int } deriving Show
+data ParseState = ParseState { _holeCount :: Int } deriving Show
+data ParseEnv = ParseEnv { _context :: [Name] } deriving Show
 
-type Parser = StateT Ctx (ParsecT Void Text Identity)
+binders :: [Name] -> Parser a -> Parser a
+binders ns p = local (\e -> e { _context = (reverse ns) ++ _context e }) p
+
+type Parser = RWST ParseEnv () ParseState (ParsecT Void Text Identity)
+
+--instance 
 
 parserTest :: Show a => Parser a -> Text -> IO ()
-parserTest p s = print $ runParserT (runStateT p (Ctx [] 0)) "" s
+parserTest p s = print $ 
+  runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
 
 -- for `dbg`
 --type Parser = ParsecT Void Text (State Ctx)
@@ -42,12 +49,16 @@ parserTest p s = print $ runParserT (runStateT p (Ctx [] 0)) "" s
 sc :: Parser ()
 sc = L.space space1 (L.skipLineComment "//") empty
 
-sym = L.symbol sc
-lit = string
+sym :: Text -> Parser Text
+sym t = L.symbol sc t
+--
+lit :: Text -> Parser Text
+lit t = string t
 
 evalTest :: Parser Term -> Text -> IO ()
 evalTest p s = do
-  let Identity (Right (a, b)) = runParserT (runStateT p (Ctx [] 0)) "" s
+  let Identity (Right (a,st,w)) =
+        runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
   print $ eval a M.empty
 
 name :: Parser Text
@@ -62,7 +73,7 @@ name = do
 
 refVar :: Parser Term
 refVar = do
-  bs <- gets binders
+  bs <- asks _context
   n <- name
   case findIndex (\x -> x == n) bs of
     Just i -> return $ Var i
@@ -83,7 +94,7 @@ allLam = do
   sc
   ctor <- (sym "->" >> return All) <|> (sym "=>" >> return Lam)
   sc
-  body <- expr
+  body <- binders ((\(x,y,z) -> x) <$> bs) expr
   return $ foldr (\(n,t,e) x -> ctor n t e x) body bs
 
 binds :: Parser [(Name, Term, Eras)]
@@ -96,8 +107,8 @@ binds = sym "(" >> go
       (b, bT) <- binderAndType
       e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
       case e of
-        Just ";" -> (do bs <- go; return $ (b,bT,Eras) : bs)
-        _        -> (do bs <- go; return $ (b,bT,Keep) : bs)
+        Just ";" -> (do bs <- binders [b] $ go; return $ (b,bT,Eras) : bs)
+        _        -> (do bs <- binders [b] $ go; return $ (b,bT,Keep) : bs)
 
     binderAndType :: Parser (Name, Term)
     binderAndType = do
@@ -105,7 +116,6 @@ binds = sym "(" >> go
       case b of
         Just n -> do
           bT <- sc >> (optional $ sym ":" >> term)
-          modify (\ctx -> ctx { binders = n : binders ctx })
           case bT of
             Just x -> return (n,x)
             Nothing -> (\x -> (n,x)) <$> newHole
@@ -116,8 +126,8 @@ binds = sym "(" >> go
 
 newHole :: Parser Term
 newHole = do
-  h <- gets holeCount
-  modify (\ctx -> ctx { holeCount = (holeCount ctx) + 1 })
+  h <- gets _holeCount
+  modify (\s -> s { _holeCount = (_holeCount s) + 1 })
   return $ Hol $ T.pack ("#" ++ show h)
 
 group :: Parser Term
@@ -131,9 +141,8 @@ slf :: Parser Term
 slf = do
   sym "${"
   n <- name <* sc
-  modify (\ctx -> ctx { binders = n : binders ctx })
   sym "}"
-  t <- term
+  t <- binders [n] term
   return $ Slf n t
 
 new :: Parser Term
@@ -230,16 +239,6 @@ expr = do
   ts <- some term
   return $ foldl1 (\x y -> App x y Keep) ts
 
-
-def' :: Parser Text
-def' = do
-  n  <- name
-  bs <- optional (lit "(b)")
-  sc
-  t  <- optional (lit ":T" <* sc )
-  optional (sym "=")
-  d  <- expr >> return "1"
-  return $ fromJust $ (Just n) <> bs <> t <> (Just d)
 
 def :: Parser (Name, Term)
 def = do

@@ -14,6 +14,7 @@ import           Control.Monad.State
 import           Control.Monad.Trans
 
 import           Core
+import           Check
 
 substHole :: Term -> Name -> Term -> Term
 substHole new nam t = let go = substHole new nam in case t of
@@ -81,29 +82,20 @@ peelApTelescope t = go t []
 applyApTelescope :: Term -> [Term] -> Term
 applyApTelescope = foldl (\x y -> App x y Keep)
 
-type Constraint = (Term, Term)
-
--- remove Environment by resolving Defs and [Binders]
---regularize :: PreConstraint -> Constraint
---regularize (env, t1, t2) = undefined
---  where
---  t1' = unbind (_context env) t1
---  t2' = unbind (_context env) t2
---
---unbind :: [Binder] -> Term -> Term
---unbind [] x = x
---unbind ((n,t,e):bs) = unbind bs (Lam n t e x)
-
--- resolve Defs
-dereference :: Term -> Defs -> Term
-dereference t ds = undefined
-
-
+--type Constraint = (Term, Term)
 
 type Subst = M.Map Name Term
 
 data UnifyEnv = UnifyEnv
 data UnifyLog = UnifyLog
+
+instance Semigroup UnifyLog where
+  (<>) _ _ = UnifyLog
+
+instance Monoid UnifyLog where
+  mappend = (<>)
+  mempty = UnifyLog
+
 data UnifyState = UnifyState
   { _varCount :: Int
   } deriving (Show, Eq)
@@ -114,16 +106,33 @@ data UnifyError
   = UnificationMismatch Term Term
   deriving Show
 
+evalEnv :: CheckEnv -> Term -> Term
+evalEnv env t = eval t M.empty
+
 -- Rigid-Rigid constraint
--- simplify :: Constraint -> Unify (Set Constraint)
--- simplify (env, t1, t2) = do
---   b <- equal env t1 t2
+--simplify :: Constraint -> Unify (Set Constraint)
+--simplify (env, t1, t2)
+--  | t1 == t2 && Set.null (holes t1)
+--    = return Set.empty
+--  | eval' t1 /= t1 
+--    = (simplify (env, eval' t1, t2))
+--  | eval' t2 /= t2 
+--    = (simplify (env, t1, eval' t2))
+--  | Ref n1 <- t1, Ref n2 <- t2, n1 == n2
+--    = return Set.empty
+--  | App f1 a1 e1 <- t1, App f2 a2 e2 <- t2, e1 == e2
+--    = return $ Set.fromList [(env, f1, f2), (env, a1, a2)]
+--  | Var i1 <- t1, Var i2 <- t2, i1 == i2 
+--    = return Set.empty
+--  | All _ from1 e1 to1 <- t1, All _ from2 e2 to2 <- t2, e1 == e2
+--    = return $ Set.fromList [(env, from1, from2), (env, to1,to2)]
+--  | Var i1 <- t1, Var i2 <- t2
+--    = return Set.empty
+--  | otherwise = return $ Set.singleton (env,t1,t2)
+
 --   when b (return $ Set.empty)
 --   case (t1,t2) of
 --     (Var
---  | t1 == t2 && Set.null (holes t1) = return $ Set.empty
--- | eval' t1 /= t1 = simplify (eval' t1, t2)
--- | eval' t2 /= t2 = simplify (t1, eval' t2)
 -- | (Var m, ctxM) <- peelApTelescope t1
 -- , (Var n, ctxN) <- peelApTelescope t1
 --   = do
@@ -140,10 +149,9 @@ data UnifyError
 -- | isStuck t1 || isStuck t2 = Set.singleton (t1,t2)
 ----  | otherwise = Set.empty
 
-eval' t = eval t M.empty
 
 --data IsEq = Eql Term Term | And IsEq IsEq | Or IsEq IsEq | Ret Bool
---
+
 --equal :: Term -> Term -> Unify Bool
 --equal a b = go (Eql a b)
 --  where

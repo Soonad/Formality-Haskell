@@ -13,16 +13,17 @@ import           Data.Void
 import           Text.Megaparsec            hiding (State)
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
+import           Control.Monad.RWS.Lazy    hiding (All)
 
 import Core
 import Lang
 
 parse' :: Parser a -> Text -> Maybe a
 parse' p s =
-  let res = runParserT (runStateT p (Ctx [] 0)) "" s in
+  let res = runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s in
   case res of
     Identity (Left e)       -> Nothing
-    Identity (Right (a, b)) -> Just a
+    Identity (Right (a, st, w)) -> Just a
 
 spec :: SpecWith ()
 spec = do

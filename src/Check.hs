@@ -51,7 +51,7 @@ data Binder = Binder
 
 data CheckLog = CheckLog
   { _logs        :: [(Term, Term, [Binder])]
-  , _constraints :: Set PreConstraint
+  , _constraints :: Set Constraint
   } deriving Show
 
 instance Semigroup CheckLog where
@@ -61,7 +61,7 @@ instance Monoid CheckLog where
   mappend = (<>)
   mempty = CheckLog mempty mempty
 
-type PreConstraint = (CheckEnv, Term, Term)
+type Constraint = (CheckEnv, Term, Term)
 
 data CheckState = CheckState
   { _holCount  :: Int
@@ -71,7 +71,7 @@ data CheckState = CheckState
 
 data CheckError
   = ErasedInKeptPosition Name
-  | UnboundVariable CheckEnv
+  | UnboundVariable Int CheckEnv
   | NotInScope Term
   | ErasureMismatch Term
   | UndefinedReference Name
@@ -117,7 +117,7 @@ check term = case term of
   Var i -> do
     ctx <- asks _context
     eras <- asks _erased
-    when (i < 0 || i >= length ctx) (ask >>= (throwError . UnboundVariable))
+    when (i < 0 || i >= length ctx) (ask >>= (throwError . UnboundVariable i))
     let (Binder n t e) = ctx !! i
     when (e == Eras && eras == Keep) (throwError $ ErasedInKeptPosition n)
     return $ (shift t (i + 1) 0)
@@ -126,7 +126,7 @@ check term = case term of
     erased $ expect Typ from
     erased $ binder (name,from,e) $ expect Typ to
     return Typ
-  Lam name from eras body-> do
+  Lam name from eras body -> do
     e <- asks _erased
     erased $ expect Typ from
     to <- erased $ binder (name,from,eras) $ check body
@@ -172,7 +172,6 @@ check term = case term of
     ctx <- asks _context
     writeLog (m, eval (erase mT) ds, ctx)
     check x
-  -- Holes in State monad
   Hol n -> return $ Hol (n `T.append` "_type")
   Ref n -> do
     ds <- asks _defs

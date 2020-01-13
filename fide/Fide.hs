@@ -3,6 +3,7 @@ module Fide where
 import           Control.Applicative
 import           Control.Monad.Identity
 import           Control.Monad.State.Strict
+import           Control.Monad.RWS.Lazy    hiding (All)
 import           Control.Monad.Trans
 
 import           Text.Megaparsec                         hiding (State)
@@ -69,41 +70,43 @@ data Command
   deriving (Eq, Show)
 
 parseLine :: Parser Command
-parseLine = do
-   choice
-     [ try $ (sym ":help" <|> sym ":h") >> return Help
-     , try $ (sym ":quit" <|> sym ":q") >> return Quit
-     , try $ do sym ":let"; (n,t) <- sc >> def; return $ Let n t
-     , try $ do (sym ":load" <|> sym ":l"); (Load . T.unpack) <$> filename <* sc
-     , try $ do (sym ":refs"); return Refs
-     , try $ do (n,t) <- sc >> def; return $ Let n t
-     , Eval <$> expr
-     ]
+parseLine = sc >> line <* eof
+  where 
+    line = choice
+      [ try $ (sym ":help" <|> sym ":h") >> return Help
+      , try $ (sym ":quit" <|> sym ":q") >> return Quit
+      , try $ do sym ":let"; (n,t) <- sc >> def; return $ Let n t
+      , try $ do (sym ":load" <|> sym ":l")
+                 (Load . T.unpack) <$> filename <* sc
+      , try $ do (sym ":refs"); return Refs
+      , try $ do (n,t) <- sc >> def; return $ Let n t
+      , Eval <$> expr
+      ]
 
 filename :: Parser Text
 filename = takeWhile1P Nothing (\s -> s /= ' ')
 
 process :: Text -> Repl ()
 process line = do
-  let res = runParserT (runStateT (sc >> parseLine <* eof) (Ctx [] 0)) "" line
+  let res = runParserT (runRWST parseLine (ParseEnv []) (ParseState 0)) "" line
   let unId (Identity x) = x
   case unId res of
     Left e      -> liftIO $ print e
-    Right (Refs,b)    -> do
+    Right (Refs,st,w)    -> do
       ds <- gets topDefs
       liftIO $ print ds
-    Right (Help,b)    -> do
+    Right (Help,st,w)    -> do
       liftIO $ putStrLn "help text fills you with determination "
-    Right (Quit,b)    -> abort
-    Right (Load f,b) -> do
+    Right (Quit,st,w)    -> abort
+    Right (Load f,st,w) -> do
       fileText <- liftIO $ readFile f
-      let res = runParserT (runStateT (file <* eof) (Ctx [] 0)) "" (T.pack fileText)
+      let res = runParserT (runRWST (file <* eof) (ParseEnv []) (ParseState 0)) "" (T.pack fileText)
       case unId res of
         Left e      -> liftIO $ print e
-        Right (defs,b) -> do
+        Right (defs,st,w) -> do
           liftIO $ putStrLn $ "Loaded "  ++ f
           modify $ \s -> s { topDefs = defs }
-    Right (Let n t, b) -> do
+    Right (Let n t,st,w) -> do
       modify $ \s -> s { topDefs = M.insert n t (topDefs s) }
       ds <- gets topDefs
       liftIO $ putStr "Read: "
@@ -129,7 +132,7 @@ process line = do
           liftIO $ putStr "Print: "
           liftIO $ putStrLn $ T.unpack $ T.concat [pretty a, " :: ", pretty aT]
           liftIO $ putStr "LOGS: "  >> putStrLn (show logs)
-    Right (Eval t ,b) -> do
+    Right (Eval t,st,w) -> do
       ds <- gets topDefs
       liftIO $ putStr "Read: "
       liftIO $ print t
