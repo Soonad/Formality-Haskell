@@ -1,90 +1,113 @@
 module Equality where
 
+import qualified Data.Map.Strict as M
+import Data.Map.Strict (Map)
+
 type Name = String
---data Eras = Eras
---          | Keep
---          -- | EHol Name
---          deriving (Show, Eq, Ord)
 
 data Term
   = Var Int
   | Typ
   | Val Int
   | Num
-  | Lam Name Term Term --  | Lam Name Term Eras Term
-  | App Term Term --  | App Term Term Eras
-  | All Name Term Term --  | All Name Term Eras Term
-  | Rec Name Term
---  | Slf Name Term
---  | New Term Term
---  | Use Term
---  | Op1 Op Int Term
---  | Op2 Op Term Term
---  | Ite Term Term Term
---  | Ann Term Term
---  | Log Term Term
---  | Hol Name
---  | Ref Name
+  | Lam Name Term Term
+  | App Term Term
+  | All Name Term Term
+  | Def Name Term
+  | Rec Int
+  | Ref Name
   deriving (Eq, Ord)
 
-hasFreeVar :: Term -> Int -> Bool
-hasFreeVar term n = case term of
-  Var i        -> i == n
-  Typ          -> False
-  All _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
-  Lam _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
-  App f a      -> hasFreeVar f n || hasFreeVar a n
-  Num          -> False
-  Val _        -> False
-  Rec _ t      -> hasFreeVar t (n + 1)
+hasFreeVar :: Term -> Bool
+hasFreeVar term = go term 0 
+  where
+    go term n = case term of
+      Var i        -> i == n
+      Typ          -> False
+      All _ h b    -> go h n || go b (n + 1)
+      Lam _ h b    -> go h n || go b (n + 1)
+      App f a      -> go f n || go a n
+      Num          -> False
+      Val _        -> False
+      Def _ t      -> go t n
+      Rec i        -> False
+
+hasFreeRec :: Term -> Bool
+hasFreeRec term = go term 0 
+  where
+    go term n = case term of
+      Var i        -> False
+      Typ          -> False
+      All _ h b    -> go h n || go b n
+      Lam _ h b    -> go h n || go b n
+      App f a      -> go f n || go a n
+      Num          -> False
+      Val _        -> False
+      Def _ t      -> go t (n + 1)
+      Rec i        -> i == n
 
 instance Show Term where
-  show t = go t []
+  show t = go t [] []
     where
-      go :: Term -> [String] -> String
-      go t s = case t of
-        Var i          -> if i < length s then s !! i else concat ["^", show i]
+      go :: Term -> [String] -> [String] -> String
+      go t vs rs = case t of
+        Var i          -> if i < length vs then vs !! i else concat ["^", show i]
         Typ            -> "Type"
-        All n h b      -> if hasFreeVar b 0 then concat ["(", n, " : ", go h s, ") -> ", go b (n : s)] else concat [go h s, " -> ", go b (n : s)]
-        Lam n h b      -> concat ["(", n, " : ", go h s, ") => ", go b (n : s)]
+        All n h b      -> if hasFreeVar b
+          then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs]
+          else concat [go h vs rs, " -> ", go b (n : vs) rs]
+        Lam n h b      -> 
+          concat ["(", n, " : ", go h vs rs, ") => ", go b (n : vs) rs]
         App f@(Lam _ _ _) a    ->
-          concat ["((", go f s, ") " , go a s, ")"]
-        App f@(Rec _ _) a    ->
-          concat ["((", go f s, ") " , go a s, ")"]
-        App f a        -> concat ["(", go f s, " ", go a s, ")"]
-        Rec n t        -> concat ["rec ", n, ". ", go t (n : s)]
+          concat ["((", go f vs rs, ") " , go a vs rs, ")"]
+        App f a        -> concat ["(", go f vs rs, " ", go a vs rs, ")"]
+        Def n t        -> concat ["rec ", n, ". ", go t vs (n : rs)]
+        Rec i          -> if i < length rs then rs !! i else concat ["^", show i]
         Num            -> "Number"
         Val i          -> show i
 
-shift :: Term -> Int -> Int -> Term
-shift term inc dep = case term of
+shiftVar :: Term -> Int -> Int -> Term
+shiftVar term inc dep = case term of
   Var i        -> Var (if i < dep then i else (i + inc))
-  Typ          -> Typ
-  All n h b    -> All n (shift h inc dep) (shift b inc (dep + 1))
-  Lam n h b    -> Lam n (shift h inc dep) (shift b inc (dep + 1))
-  App f a      -> App (shift f inc dep) (shift a inc dep)
-  Num          -> Num
-  Val n        -> Val n
-  Rec n t      -> Rec n (shift t inc (dep + 1))
+  All n h b    -> All n (shiftVar h inc dep) (shiftVar b inc (dep + 1))
+  Lam n h b    -> Lam n (shiftVar h inc dep) (shiftVar b inc (dep + 1))
+  App f a      -> App (shiftVar f inc dep) (shiftVar a inc dep)
+  Def n t      -> Def n (shiftVar t inc dep)
+  x            -> x
 
-subst :: Term -> Term -> Int -> Term
-subst term v dep =
-  let v' = shift v 1 0 in
-  case term of
+shiftRec :: Term -> Int -> Int -> Term
+shiftRec term inc dep = case term of
+  Lam n h b -> Lam n (shiftRec h inc dep) (shiftRec h inc dep)
+  All n h b -> All n (shiftRec h inc dep) (shiftRec h inc dep)
+  App f a   -> App (shiftRec f inc dep) (shiftRec a inc dep)
+  Def n t   -> Def n (shiftRec t inc (dep + 1))
+  Rec i     -> Rec (if i < dep then i else (i + inc))
+  x         -> x
+
+substVar :: Term -> Term -> Int -> Term
+substVar term v dep = let v' = shiftVar v 1 0 in case term of
   Var i       -> if i == dep then v else Var (i - if i > dep then 1 else 0)
-  Typ         -> Typ
-  All n h b   -> All n (subst h v dep) (subst b v' (dep + 1))
-  Lam n h b   -> Lam n (subst h v dep) (subst b v' (dep + 1))
-  App f a     -> App (subst f v dep) (subst a v dep)
-  Num         -> Num
-  Val n       -> Val n
-  Rec n t     -> Rec n (subst t v' (dep + 1))
+  All n h b   -> All n (substVar h v dep) (substVar b v' (dep + 1))
+  Lam n h b   -> Lam n (substVar h v dep) (substVar b v' (dep + 1))
+  App f a     -> App (substVar f v dep) (substVar a v dep)
+  Def n t     -> Def n (substVar t v dep)
+  x           -> x
 
-substMany :: Term -> [Term] -> Int -> Term
-substMany t vals d = go t vals d 0
+substRec :: Term -> Term -> Int -> Term
+substRec term v dep = let v' = shiftRec v 1 0 in case term of
+  All n h b   -> All n (substRec h v dep) (substRec b v dep)
+  Lam n h b   -> Lam n (substRec h v dep) (substRec b v' dep)
+  App f a     -> App (substRec f v dep) (substRec a v dep)
+  Def n t     -> Def n (substRec t v' (dep + 1))
+  Rec i       -> if i == dep then v else Rec (i - if i > dep then 1 else 0)
+  x           -> x
+
+substManyVar :: Term -> [Term] -> Int -> Term
+substManyVar t vals d = go t vals d 0
   where
     l = length vals - 1
-    go t (v:vs) d i = go (subst t (shift v (l - i) 0) (d + l - i)) vs d (i + 1)
+    go t (v:vs) d i =
+      go (substVar t (shiftVar v (l - i) 0) (d + l - i)) vs d (i + 1)
     go t [] d i = t
 
 eval :: Term -> Term
@@ -96,29 +119,30 @@ eval term = case term of
   App f a   ->
     let a' = eval a
     in case eval f of
-      Lam _ _ b' -> eval (subst b' a' 0)
-      f            -> App f a'
+      Lam _ _ b' -> eval (substVar b' a' 0)
+      f          -> App f a'
   Num       -> Num
   Val n     -> Val n
-  Rec n t   -> Rec n (eval t)
+  Def n t   -> eval (substRec t (Def n t) 0)
+  Rec i     -> Rec i
+  Ref n     -> Ref n
 
-unroll :: Term -> Term
-unroll term = case term of
-  Var i     -> Var i
-  Typ       -> Typ
-  All n h b -> All n (unroll h) (unroll b)
-  Lam n h b -> Lam n (unroll h) (unroll b)
-  App f a   -> App (unroll f) (unroll a)
-  Num       -> Num
-  Val n     -> Val n
-  Rec n t   -> subst t (Rec n t) 0
+deref :: Term -> M.Map String Term -> Term
+deref term defs = case term of
+  Lam n h b -> Lam n (deref h defs) (deref b defs)
+  All n h b -> All n (deref h defs) (deref b defs)
+  App f a   -> App (deref f defs) (deref a defs)
+  Def n t   -> Def n (deref t defs)
+  Ref n     -> defs M.! n
+  x -> x
+
 
 contractibleSubst :: Term -> Int -> Bool
 contractibleSubst t n = case t of
-  Var i     -> i /= n
-  Rec _ t   -> contractibleSubst t (n + 1)
-  Lam _ _ _ -> False 
-  App _ _   -> False 
+  Rec i     -> i /= n
+  Def _ t   -> contractibleSubst t (n + 1)
+  Lam _ _ _ -> False
+  App _ _   -> False
   _         -> True
 
 -- The Lam and App cases could potentially be, instead
@@ -127,9 +151,8 @@ contractibleSubst t n = case t of
 -- However, a contractible term T would lose the useful property that if it is normalized, then T^n is also normalized,
 -- for any power n, where T^n means substitute variable 0 in T by itself n times, that is,
 -- `T^0 = Var 0` and `T^(n+1) = subst T^n T 0`. This means in particular that if T is contractible,
--- then `Rec "X" T` is normalized no matter how many times we unroll it.
-
+-- then `Def "X" T` is normalized no matter how many times we unroll it.
 
 -- Examples of substitutions which are not contractible when you consider evaluation of terms, which rule out `Lam` and `App` as guards for recursion
-notcontractible1 = Rec "X" (Lam "a" Typ (App (Var 1) (Var 0)))
-notcontractible2 = Rec "X" (App (Lam "a" Typ (Var 0)) (Var 0))
+notcontractible1 = Def "X" (Lam "a" Typ (App (Rec 0) (Var 0)))
+notcontractible2 = Def "X" (App (Lam "a" Typ (Var 0)) (Rec 0))
