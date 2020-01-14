@@ -27,6 +27,17 @@ data Term
 --  | Ref Name
   deriving (Eq, Ord)
 
+hasFreeVar :: Term -> Int -> Bool
+hasFreeVar term n = case term of
+  Var i        -> i == n
+  Typ          -> False
+  All _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
+  Lam _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
+  App f a      -> hasFreeVar f n || hasFreeVar a n
+  Num          -> False
+  Val _        -> False
+  Rec _ t      -> hasFreeVar t (n + 1)
+
 instance Show Term where
   show t = go t []
     where
@@ -34,7 +45,7 @@ instance Show Term where
       go t s = case t of
         Var i          -> if i < length s then s !! i else concat ["^", show i]
         Typ            -> "Type"
-        All n h b      -> concat ["(", n, " : ", go h s, ") -> ", go b (n : s)]
+        All n h b      -> if hasFreeVar b 0 then concat ["(", n, " : ", go h s, ") -> ", go b (n : s)] else concat [go h s, " -> ", go b (n : s)]
         Lam n h b      -> concat ["(", n, " : ", go h s, ") => ", go b (n : s)]
         App f@(Lam _ _ _) a    ->
           concat ["((", go f s, ") " , go a s, ")"]
@@ -95,9 +106,30 @@ unroll :: Term -> Term
 unroll term = case term of
   Var i     -> Var i
   Typ       -> Typ
-  All n h b -> All n h (unroll b)
+  All n h b -> All n (unroll h) (unroll b)
   Lam n h b -> Lam n (unroll h) (unroll b)
   App f a   -> App (unroll f) (unroll a)
   Num       -> Num
   Val n     -> Val n
   Rec n t   -> subst t (Rec n t) 0
+
+contractibleSubst :: Term -> Int -> Bool
+contractibleSubst t n = case t of
+  Var i     -> i /= n
+  Rec _ t   -> contractibleSubst t (n + 1)
+  Lam _ _ _ -> False 
+  App _ _   -> False 
+  _         -> True
+
+-- The Lam and App cases could potentially be, instead
+--  Lam _ t b -> contractibleSubst t n || contractibleSubst b (n + 1)
+--  App f a   -> contractibleSubst f n || contractibleSubst a n
+-- However, a contractible term T would lose the useful property that if it is normalized, then T^n is also normalized,
+-- for any power n, where T^n means substitute variable 0 in T by itself n times, that is,
+-- `T^0 = Var 0` and `T^(n+1) = subst T^n T 0`. This means in particular that if T is contractible,
+-- then `Rec "X" T` is normalized no matter how many times we unroll it.
+
+
+-- Examples of substitutions which are not contractible when you consider evaluation of terms, which rule out `Lam` and `App` as guards for recursion
+notcontractible1 = Rec "X" (Lam "a" Typ (App (Var 1) (Var 0)))
+notcontractible2 = Rec "X" (App (Lam "a" Typ (Var 0)) (Var 0))
