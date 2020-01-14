@@ -9,29 +9,30 @@ import Control.Monad.State
 import Control.Monad.Except
 
 type Name = Text
-data Eras = Eras
-          | Keep
-          -- | EHol Name
+data Eras = Eras  -- Erase from runtime
+          | Keep  -- Keep at runtime
+          -- | EHol Name  -- Erasure metavariable (probably not needed)
           deriving (Show, Eq, Ord)
 
 data Term
-  = Var Int
-  | Typ
-  | All Name Term Eras Term
-  | Lam Name Term Eras Term
-  | App Term Term Eras
-  | Slf Name Term
-  | New Term Term
-  | Use Term
-  | Num
-  | Val Int
-  | Op1 Op Int Term
-  | Op2 Op Term Term
-  | Ite Term Term Term
-  | Ann Term Term
-  | Log Term Term
-  | Hol Name
-  | Ref Name
+  = Var Int                    -- Variable
+  | Typ                        -- Type type
+  | All Name Term Eras Term    -- Forall
+  | Lam Name Term Eras Term    -- Lambda
+  | App Term Term Eras         -- Application
+  | Slf Name Term              -- Self-type
+  | New Term Term              -- Self-type introduction
+  | Use Term                   -- Self-type elimination
+  | Num                        -- Number type
+  | Val Int                    -- Number Value
+  | Op1 Op Int Term            -- Unary operation (curried)
+  | Op2 Op Term Term           -- Binary operation
+  | Ite Term Term Term         -- If-then-else
+  | Ann Term Term              -- Type annotation
+  | Log Term Term              -- inline log
+  | Hol Name                   -- type hole or metavariable
+--  | Let Name Term Term         -- locally scoped definition
+  | Ref Name                   -- reference to a globally scoped definition
   deriving (Eq, Show, Ord)
 
 data Op
@@ -39,6 +40,7 @@ data Op
   -- | POW | AND | BOR | XOR | NOT | SHR | SHL | GTH | LTH | EQL
   deriving (Eq, Show, Ord)
 
+-- shift DeBruijn indices in term by an increment at/greater than a depth
 shift :: Term -> Int -> Int -> Term
 shift term inc dep = case term of
   Var i        -> Var (if i < dep then i else (i + inc))
@@ -59,6 +61,7 @@ shift term inc dep = case term of
   Hol n        -> Hol n
   Ref n        -> Ref n
 
+-- substitute a value for an index at a certain depth
 subst :: Term -> Term -> Int -> Term
 subst term v dep =
   let v' = shift v 1 0 in
@@ -131,3 +134,19 @@ op o a b = case o of
   MOD -> a `mod` b
   --POW -> a ^ b
 
+erase :: Term -> Term
+erase term = case term of
+  All n h e b    -> All n (erase h) e (erase b)
+  Lam n h Eras b -> erase $ subst b (Hol "#erased") 0
+  Lam n h e b    -> Lam n (erase h) e (erase b)
+  App f a Eras   -> erase f
+  App f a e      -> App (erase f) (erase a) e
+  Op1 o a b      -> Op1 o a (erase b)
+  Op2 o a b      -> Op2 o (erase a) (erase b)
+  Ite c t f      -> Ite (erase c) (erase t) (erase f)
+  Slf n t        -> Slf n (erase t)
+  New t x        -> erase x
+  Use x          -> erase x
+  Ann t x        -> erase x
+  Log m x        -> Log (erase m) (erase x)
+  _ -> term
