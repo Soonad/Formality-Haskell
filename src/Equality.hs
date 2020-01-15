@@ -3,6 +3,8 @@ module Equality where
 import qualified Data.Map.Strict as M
 import Data.Map.Strict (Map)
 
+import Data.List (findIndex)
+
 type Name = String
 
 data Term
@@ -23,28 +25,24 @@ hasFreeVar term = go term 0
   where
     go term n = case term of
       Var i        -> i == n
-      Typ          -> False
       All _ h b    -> go h n || go b (n + 1)
       Lam _ h b    -> go h n || go b (n + 1)
       App f a      -> go f n || go a n
-      Num          -> False
-      Val _        -> False
       Def _ t      -> go t n
-      Rec i        -> False
+      _            -> False
 
 hasFreeRec :: Term -> Bool
 hasFreeRec term = go term 0 
   where
     go term n = case term of
-      Var i        -> False
-      Typ          -> False
       All _ h b    -> go h n || go b n
       Lam _ h b    -> go h n || go b n
       App f a      -> go f n || go a n
-      Num          -> False
-      Val _        -> False
       Def _ t      -> go t (n + 1)
       Rec i        -> i == n
+      _            -> False
+
+--newtype Pretty = Pretty { unpretty :: Term }
 
 instance Show Term where
   show t = go t [] []
@@ -53,6 +51,7 @@ instance Show Term where
       go t vs rs = case t of
         Var i          -> if i < length vs then vs !! i else concat ["^", show i]
         Typ            -> "Type"
+        Num            -> "Number"
         All n h b      -> if hasFreeVar b
           then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs]
           else concat [go h vs rs, " -> ", go b (n : vs) rs]
@@ -61,9 +60,9 @@ instance Show Term where
         App f@(Lam _ _ _) a    ->
           concat ["((", go f vs rs, ") " , go a vs rs, ")"]
         App f a        -> concat ["(", go f vs rs, " ", go a vs rs, ")"]
-        Def n t        -> concat ["rec ", n, ". ", go t vs (n : rs)]
+        Def n t        -> concat ["def ", n, ". ", go t vs (n : rs)]
+        Ref n          -> "_" ++ n
         Rec i          -> if i < length rs then rs !! i else concat ["^", show i]
-        Num            -> "Number"
         Val i          -> show i
 
 shiftVar :: Term -> Int -> Int -> Term
@@ -128,14 +127,17 @@ eval term = case term of
   Ref n     -> Ref n
 
 deref :: Term -> M.Map String Term -> Term
-deref term defs = case term of
-  Lam n h b -> Lam n (deref h defs) (deref b defs)
-  All n h b -> All n (deref h defs) (deref b defs)
-  App f a   -> App (deref f defs) (deref a defs)
-  Def n t   -> Def n (deref t defs)
-  Ref n     -> defs M.! n
-  x -> x
-
+deref term defs = go term []
+  where 
+    go t ctx = case t of
+      Lam n h b -> Lam n (go h ctx) (go b ctx)
+      All n h b -> All n (go h ctx) (go b ctx)
+      App f a   -> App (go f ctx) (go a ctx)
+      Def n t   -> Def n (go t (n:ctx))
+      Ref n     -> case findIndex ((==) n) ctx of
+        Just i  -> Rec i
+        Nothing -> go (defs M.! n) ctx
+      _         -> t
 
 contractibleSubst :: Term -> Int -> Bool
 contractibleSubst t n = case t of
@@ -156,3 +158,15 @@ contractibleSubst t n = case t of
 -- Examples of substitutions which are not contractible when you consider evaluation of terms, which rule out `Lam` and `App` as guards for recursion
 notcontractible1 = Def "X" (Lam "a" Typ (App (Rec 0) (Var 0)))
 notcontractible2 = Def "X" (App (Lam "a" Typ (Var 0)) (Rec 0))
+
+inf = Def "Inf" (All "_" Num (Rec 0))
+
+inf2 = Def "Inf2" (All "_" Num (Rec 0))
+
+f = Def "f" (All "_" Num (Ref "g"))
+g = Def "g" (All "_" Num (Ref "f"))
+
+fg_defs = M.fromList [("f",f),("g",g)]
+
+
+
