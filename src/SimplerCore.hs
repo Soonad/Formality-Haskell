@@ -24,7 +24,7 @@ hasFreeVar term n = case term of
   Mu _ t       -> hasFreeVar t (n + 1)
   _            -> False
 
-pretty t = go t [] []
+pretty t = putStrLn $ go t [] []
   where
     go :: Term -> [String] -> [String] -> String
     go t vs rs = case t of
@@ -32,6 +32,7 @@ pretty t = go t [] []
       Rec i                     -> if i < length rs then rs !! i else concat ["#", show i]
       Typ                       -> "Type"
       All n h@Typ b             -> concat ["∀", n, ". ", go b (n : vs) rs]
+      All n h@(All _ _ _) b     -> if hasFreeVar b 0 then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else concat ["(", go h vs rs, ") -> ", go b (n : vs) rs]
       All n h b                 -> if hasFreeVar b 0 then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else concat [go h vs rs, " -> ", go b (n : vs) rs]
       Lam n h@Any b@(Lam _ _ _) -> concat ["(", n, ", ", tail $ go b (n : vs) rs]
       Lam n h@Any b             -> concat ["(", n, ") => ", go b (n : vs) rs]
@@ -94,11 +95,11 @@ substRec term v dep = case term of
 maxFreeVar :: Term -> Int
 maxFreeVar term = aux term 0 where
   aux term n = case term of
-    Var i        -> if i < n then 0 else i
+    Var i        -> if i < n then 0 else i-n
     All _ h b    -> aux h n `max` aux b (n + 1)
     Lam _ h b    -> aux h n `max` aux b (n + 1)
     App f a      -> aux f n `max` aux a n
-    Mu _ t       -> aux t (n + 1)
+    Mu _ t       -> aux t n
     _            -> 0
 
 substManyVar :: Term -> [Term] -> Int -> Term
