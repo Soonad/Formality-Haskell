@@ -21,7 +21,7 @@ hasFreeVar term n = case term of
   All _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
   Lam _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
   App f a      -> hasFreeVar f n || hasFreeVar a n
-  Mu _ t       -> hasFreeVar t (n + 1)
+  Mu _ t       -> hasFreeVar t n
   _            -> False
 
 pretty t = putStrLn $ go t [] []

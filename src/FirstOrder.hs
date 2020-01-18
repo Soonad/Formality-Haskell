@@ -1,5 +1,6 @@
 module FirstOrder where
 
+import Data.Char(chr)
 import SimplerCore
 
 data Term'
@@ -25,12 +26,36 @@ encode term = go term (\x -> x)
     All _ h b -> All' max (go h sigma) (go (substVar b (Var (max+1)) 0) sigma)
     Lam _ h b -> Lam' max (go h sigma) (go (substVar b (Var (max+1)) 0) sigma)
     App f t   -> App' max (go f sigma) (go t sigma)
-    Mu n t    -> Mu'  n (go t (\t -> sigma (substRec t (Var max) 0)))
+    Mu  n t   -> Mu'  n (go t (\t -> sigma (substRec t (Var max) 0)))
     Any       -> Any'
     Typ       -> Typ'
     Num       -> Num'
     Val i     -> Val' i
     where max = maxFreeVar (sigma term)
+
+alphabet :: Int -> String
+alphabet x = reverse (go x)
+  where go x = chr (rest+97) : (if div <= 0 then "" else go (div-1)) where (div, rest) = divMod x 26
+
+toVar :: Int -> [Int] -> Int
+toVar i lams = go i lams 0 where
+  go i [] depth = i + depth
+  go i (m : lams) depth = if m < i then depth else go i lams (depth + 1)
+  
+decode :: Term' -> Term
+decode term' = go term' 0 []
+  where
+  go term' count lams = case term' of
+    Var' i     -> Var (toVar i lams)
+    All' m h b -> All (alphabet count) (go h count lams) (go b (count+1) (m : lams))
+    Lam' m h b -> Lam (alphabet count) (go h count lams) (go b (count+1) (m : lams))
+    App' m f t -> App (go f count lams) (go t count lams)
+    Mu'  n t   -> Mu  n (go t count lams)
+    Rec' i     -> Rec i
+    Any'       -> Any
+    Typ'       -> Typ
+    Num'       -> Num
+    Val' i     -> Val i
   
 -- Tests
 forall n = All n Typ
