@@ -61,8 +61,8 @@ shiftVar term inc dep = case term of
 
 shiftRec :: Term -> Int -> Int -> Term
 shiftRec term inc dep = case term of
-  Lam n h b -> Lam n (shiftRec h inc dep) (shiftRec h inc dep)
-  All n h b -> All n (shiftRec h inc dep) (shiftRec h inc dep)
+  Lam n h b -> Lam n (shiftRec h inc dep) (shiftRec b inc dep)
+  All n h b -> All n (shiftRec h inc dep) (shiftRec b inc dep)
   App f a   -> App (shiftRec f inc dep) (shiftRec a inc dep)
   Mu  n t   -> Mu  n (shiftRec t inc (dep + 1))
   Rec i     -> Rec (if i < dep then i else (i + inc))
