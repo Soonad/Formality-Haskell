@@ -13,7 +13,7 @@ data Term
   | Mu Name Term
   | Any -- Type of any term
   | Rec Int
-  deriving (Eq, Ord)
+  deriving (Eq, Show, Ord)
 
 hasFreeVar :: Term -> Int -> Bool
 hasFreeVar term n = case term of
@@ -21,34 +21,34 @@ hasFreeVar term n = case term of
   All _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
   Lam _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
   App f a      -> hasFreeVar f n || hasFreeVar a n
-  Mu _ t       -> hasFreeVar t (n + 1)
+  Mu _ t       -> hasFreeVar t n
   _            -> False
 
-instance Show Term where
-  show t = go t [] []
-    where
-      go :: Term -> [String] -> [String] -> String
-      go t vs rs = case t of
-        Var i                     -> if i < length vs then vs !! i else concat ["^", show i]
-        Rec i                     -> if i < length rs then rs !! i else concat ["#", show i]
-        Typ                       -> "Type"
-        All n h@Typ b             -> concat ["∀", n, ". ", go b (n : vs) rs]
-        All n h b                 -> if hasFreeVar b 0 then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else concat [go h vs rs, " -> ", go b (n : vs) rs]
-        Lam n h@Any b@(Lam _ _ _) -> concat ["(", n, ", ", tail $ go b (n : vs) rs]
-        Lam n h@Any b             -> concat ["(", n, ") => ", go b (n : vs) rs]
-        Lam n h b@(Lam _ _ _)     -> concat ["(", n, " : ", go h vs rs, ", ", tail $ go b (n : vs) rs]
-        Lam n h b                 -> concat ["(", n, " : ", go h vs rs, ") => ", go b (n : vs) rs]
-        App f@(App _ _) a         ->
-          concat [init $ go f vs rs, " ", go a vs rs, ")"]
-        App f@(Lam _ _ _) a       ->
-          concat ["((", go f vs rs, ") " , go a vs rs, ")"]
-        App f@(Mu _ _) a          ->
-          concat ["((", go f vs rs, ") " , go a vs rs, ")"]
-        App f a                   -> concat ["(", go f vs rs, " ", go a vs rs, ")"]
-        Mu n t                    -> concat ["μ", n, ". ", go t vs (n : rs)]
-        Num                       -> "Number"
-        Val i                     -> show i
-        Any                       -> "Any"
+pretty t = putStrLn $ go t [] []
+  where
+    go :: Term -> [String] -> [String] -> String
+    go t vs rs = case t of
+      Var i                     -> if i < length vs then vs !! i else concat ["^", show i]
+      Rec i                     -> if i < length rs then rs !! i else concat ["#", show i]
+      Typ                       -> "Type"
+      All n h@Typ b             -> concat ["∀", n, ". ", go b (n : vs) rs]
+      All n h@(All _ _ _) b     -> if hasFreeVar b 0 then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else concat ["(", go h vs rs, ") -> ", go b (n : vs) rs]
+      All n h b                 -> if hasFreeVar b 0 then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else concat [go h vs rs, " -> ", go b (n : vs) rs]
+      Lam n h@Any b@(Lam _ _ _) -> concat ["(", n, ", ", tail $ go b (n : vs) rs]
+      Lam n h@Any b             -> concat ["(", n, ") => ", go b (n : vs) rs]
+      Lam n h b@(Lam _ _ _)     -> concat ["(", n, " : ", go h vs rs, ", ", tail $ go b (n : vs) rs]
+      Lam n h b                 -> concat ["(", n, " : ", go h vs rs, ") => ", go b (n : vs) rs]
+      App f@(App _ _) a         ->
+        concat [init $ go f vs rs, " ", go a vs rs, ")"]
+      App f@(Lam _ _ _) a       ->
+        concat ["((", go f vs rs, ") " , go a vs rs, ")"]
+      App f@(Mu _ _) a          ->
+        concat ["((", go f vs rs, ") " , go a vs rs, ")"]
+      App f a                   -> concat ["(", go f vs rs, " ", go a vs rs, ")"]
+      Mu n t                    -> concat ["μ", n, ". ", go t vs (n : rs)]
+      Num                       -> "Number"
+      Val i                     -> show i
+      Any                       -> "Any"
 
 shiftVar :: Term -> Int -> Int -> Term
 shiftVar term inc dep = case term of
@@ -61,8 +61,8 @@ shiftVar term inc dep = case term of
 
 shiftRec :: Term -> Int -> Int -> Term
 shiftRec term inc dep = case term of
-  Lam n h b -> Lam n (shiftRec h inc dep) (shiftRec h inc dep)
-  All n h b -> All n (shiftRec h inc dep) (shiftRec h inc dep)
+  Lam n h b -> Lam n (shiftRec h inc dep) (shiftRec b inc dep)
+  All n h b -> All n (shiftRec h inc dep) (shiftRec b inc dep)
   App f a   -> App (shiftRec f inc dep) (shiftRec a inc dep)
   Mu  n t   -> Mu  n (shiftRec t inc (dep + 1))
   Rec i     -> Rec (if i < dep then i else (i + inc))
@@ -95,11 +95,11 @@ substRec term v dep = case term of
 maxFreeVar :: Term -> Int
 maxFreeVar term = aux term 0 where
   aux term n = case term of
-    Var i        -> if i < n then 0 else i
+    Var i        -> if i < n then 0 else i-n
     All _ h b    -> aux h n `max` aux b (n + 1)
     Lam _ h b    -> aux h n `max` aux b (n + 1)
     App f a      -> aux f n `max` aux a n
-    Mu _ t       -> aux t (n + 1)
+    Mu _ t       -> aux t n
     _            -> 0
 
 substManyVar :: Term -> [Term] -> Int -> Term
