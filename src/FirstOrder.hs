@@ -5,7 +5,6 @@ import Control.Monad.ST
 import Control.Monad.State
 import Data.UnionFind.ST
 import qualified Data.Map.Strict as M
-import qualified Data.Set as S
 import SimplerCore
 
 data Term'
@@ -74,7 +73,7 @@ toVar :: Int -> [Int] -> Int
 toVar i lams = go i lams 0 where
   go i [] depth = i + depth
   go i (m : lams) depth = if m < i then depth else go i lams (depth + 1)
-  
+
 decode :: Term' -> Term
 decode term' = go term' 0 []
   where
@@ -89,7 +88,7 @@ decode term' = go term' 0 []
     Typ'       -> Typ
     Num'       -> Num
     Val' i     -> Val i
-  
+
 -- Equality algorithm
 data Node a = Leaf | Branch a a
 
@@ -108,24 +107,24 @@ sameNode Num' Num'                   = Just Leaf
 sameNode _ _                         = Nothing
 
 -- The set of all subterms of a term
-allSubterms :: Term' -> S.Set Term'
-allSubterms term' = go term' S.empty where
-  go term' set = if S.size set == S.size set'
-    then set'
+allSubterms :: Term' -> M.Map Term' (ST s (Point s Term'))
+allSubterms term' = go term' M.empty where
+  go term' map = if M.size map == M.size map'
+    then map'
     else case term' of
-      App' i f t -> go f set' `S.union` go t set'
-      All' i h b -> go h set' `S.union` go b set'
-      Lam' i h b -> go h set' `S.union` go b set'
-      Mu'  t     -> go (unroll' $ Mu' t) set'
-      _          -> set'
-    where set' = S.insert term' set
+      App' i f t -> go f map' <> go t map'
+      All' i h b -> go h map' <> go b map'
+      Lam' i h b -> go h map' <> go b map'
+      Mu'  t     -> go (unroll' $ Mu' t) map'
+      _          -> map'
+    where map' = M.insert term' (fresh term') map
 
 equalTerms :: Term -> Term -> Bool
 equalTerms term1 term2 = runST $ do
   let term1' = encode term1
   let term2' = encode term2
-  let subterms = M.fromSet (\x -> x) $ allSubterms term1' `S.union` allSubterms term2'
-  map <- forM subterms fresh
+  let subterms = allSubterms term1' <> allSubterms term2'
+  map <- forM subterms (\x -> x)
   go [(term1', term2')] map
   where
     go [] map = return True
