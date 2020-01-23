@@ -1,6 +1,11 @@
 module FirstOrder where
 
 import Data.Char(chr)
+import Control.Monad.ST
+import Control.Monad.State
+import Data.UnionFind.ST
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import SimplerCore
 
 data Term'
@@ -9,12 +14,40 @@ data Term'
   | Lam' Int Term' Term'
   | App' Int Term' Term'
   | All' Int Term' Term'
-  | Mu' Name Term'
+  | Mu' Term'
   | Any'
   | Typ'
   | Val' Int
   | Num'
   deriving (Eq, Show, Ord)
+
+shiftRec' :: Term' -> Int -> Int -> Term'
+shiftRec' term' inc dep = case term' of
+  Lam' i h b -> Lam' i (shiftRec' h inc dep) (shiftRec' b inc dep)
+  All' i h b -> All' i (shiftRec' h inc dep) (shiftRec' b inc dep)
+  App' i f a -> App' i (shiftRec' f inc dep) (shiftRec' a inc dep)
+  Mu'  t     -> Mu'  (shiftRec' t inc (dep + 1))
+  Rec' i     -> Rec' (if i < dep then i else (i + inc))
+  _          -> term'
+
+substRec' :: Term' -> Term' -> Int -> Term'
+substRec' term' v dep = case term' of
+  All' i h b   -> All' i (substRec' h v dep) (substRec' b v dep)
+  Lam' i h b   -> Lam' i (substRec' h v dep) (substRec' b v dep)
+  App' i f a   -> App' i (substRec' f v dep) (substRec' a v dep)
+  Mu'  t       -> Mu'  (substRec' t vR (dep + 1))
+  Rec' i       -> if i == dep then v else Rec' (i - if i > dep then 1 else 0)
+  _            -> term'
+  where
+    vR = shiftRec' v 1 0
+
+unroll' :: Term' -> Term'
+unroll' term' = case term' of
+  All' i h b -> All' i (unroll' h) (unroll' b)
+  Lam' i h b -> Lam' i (unroll' h) (unroll' b)
+  App' i f a -> App' i (unroll' f) (unroll' a)
+  Mu'  t     -> substRec' t (Mu' t) 0
+  _          -> term'
 
 encode :: Term -> Term'
 encode term = go term (\x -> x)
@@ -26,7 +59,7 @@ encode term = go term (\x -> x)
     All _ h b -> All' max (go h sigma) (go (substVar b (Var (max+1)) 0) sigma)
     Lam _ h b -> Lam' max (go h sigma) (go (substVar b (Var (max+1)) 0) sigma)
     App f t   -> App' max (go f sigma) (go t sigma)
-    Mu  n t   -> Mu'  n (go t (\t -> sigma (substRec t (Var max) 0)))
+    Mu  _ t   -> Mu'  (go t (\t -> sigma (substRec t (Var max) 0)))
     Any       -> Any'
     Typ       -> Typ'
     Num       -> Num'
@@ -50,16 +83,69 @@ decode term' = go term' 0 []
     All' m h b -> All (alphabet count) (go h count lams) (go b (count+1) (m : lams))
     Lam' m h b -> Lam (alphabet count) (go h count lams) (go b (count+1) (m : lams))
     App' m f t -> App (go f count lams) (go t count lams)
-    Mu'  n t   -> Mu  n (go t count lams)
+    Mu'  t     -> Mu  (alphabet count) (go t (count+1) lams)
     Rec' i     -> Rec i
     Any'       -> Any
     Typ'       -> Typ
     Num'       -> Num
     Val' i     -> Val i
   
+-- Equality algorithm
+data Node a = Leaf | Branch a a
+
+sameNode :: Term' -> Term' -> Maybe (Node (Term', Term'))
+sameNode t@(Mu' _) s                 = sameNode (unroll' t) s
+sameNode t s@(Mu' _)                 = sameNode t (unroll' s)
+sameNode (All' i h b) (All' j h' b') = if i == j then Just $ Branch (h, h') (b, b') else Nothing
+sameNode (Lam' i h b) (Lam' j h' b') = if i == j then Just $ Branch (h, h') (b, b') else Nothing
+sameNode (App' i f a) (App' j f' a') = if i == j then Just $ Branch (f, f') (a, a') else Nothing
+sameNode (Var' i) (Var' j)           = if i == j then Just Leaf else Nothing
+sameNode (Rec' i) (Rec' j)           = if i == j then Just Leaf else Nothing
+sameNode (Val' i) (Val' j)           = if i == j then Just Leaf else Nothing
+sameNode Any' Any'                   = Just Leaf
+sameNode Typ' Typ'                   = Just Leaf
+sameNode Num' Num'                   = Just Leaf
+sameNode _ _                         = Nothing
+
+-- The set of all subterms of a term
+allSubterms :: Term' -> S.Set Term'
+allSubterms term' = go term' S.empty where
+  go term' set = if S.size set == S.size set'
+    then set'
+    else case term' of
+      App' i f t -> go f set' `S.union` go t set'
+      All' i h b -> go h set' `S.union` go b set'
+      Lam' i h b -> go h set' `S.union` go b set'
+      Mu'  t     -> go (unroll' $ Mu' t) set'
+      _          -> set'
+    where set' = S.insert term' set
+
+equalTerms :: Term -> Term -> Bool
+equalTerms term1 term2 = runST $ do
+  let term1' = encode term1
+  let term2' = encode term2
+  let subterms = M.fromSet (\x -> x) $ allSubterms term1' `S.union` allSubterms term2'
+  map <- forM subterms fresh
+  go [(term1', term2')] map
+  where
+    go [] map = return True
+    go ((term1, term2) : pairs) map = case sameNode term1 term2 of
+      Just (Branch pair1 pair2) -> do
+        r1 <- repr (map M.! term1)
+        r2 <- repr (map M.! term2)
+        if r1 == r2
+          then go pairs map
+          else union r1 r2 >> go (pair1 : pair2 : pairs) map
+      Just Leaf -> union (map M.! term1) (map M.! term2) >> go pairs map
+      Nothing -> return False
+
 -- Tests
 forall n = All n Typ
 impl a b = All "" a (shiftVar b 1 0)
 
 test1 = forall "a" $ Mu "X" $ impl (Var 0) $ forall "b" $ impl (Var 0) (Rec 0)
 test2 = Mu "X" $ forall "a" $ impl (forall "c" $ impl (Var 1) (Var 0)) $ forall "b" $ impl (Var 0) (Rec 0)
+
+-- Equal terms
+test3 = forall "a" $ Mu "X" $ impl (Var 0) $ impl (Var 0) $ impl (Var 0) (Rec 0)
+test4 = forall "a" $ Mu "X" $ impl (Var 0) $ impl (Var 0) (Rec 0)
