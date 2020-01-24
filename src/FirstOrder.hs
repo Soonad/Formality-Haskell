@@ -48,6 +48,7 @@ unroll' term' = case term' of
   Mu'  t     -> substRec' t (Mu' t) 0
   _          -> term'
 
+-- First order encoding
 encode :: Term -> Term'
 encode term = go term (\x -> x)
   where
@@ -57,7 +58,7 @@ encode term = go term (\x -> x)
     Rec i     -> Rec' i
     All _ h b -> All' max (go h sigma) (go (substVar b (Var (max+1)) 0) sigma)
     Lam _ h b -> Lam' max (go h sigma) (go (substVar b (Var (max+1)) 0) sigma)
-    App f t   -> App' max (go f sigma) (go t sigma)
+    App f a   -> App' max (go f sigma) (go a sigma)
     Mu  _ t   -> Mu'  (go t (\t -> sigma (substRec t (Var max) 0)))
     Any       -> Any'
     Typ       -> Typ'
@@ -81,7 +82,7 @@ decode term' = go term' 0 []
     Var' i     -> Var (toVar i lams)
     All' m h b -> All (alphabet count) (go h count lams) (go b (count+1) (m : lams))
     Lam' m h b -> Lam (alphabet count) (go h count lams) (go b (count+1) (m : lams))
-    App' m f t -> App (go f count lams) (go t count lams)
+    App' m f a -> App (go f count lams) (go a count lams)
     Mu'  t     -> Mu  (alphabet count) (go t (count+1) lams)
     Rec' i     -> Rec i
     Any'       -> Any
@@ -106,24 +107,23 @@ sameNode Typ' Typ'                   = Just Leaf
 sameNode Num' Num'                   = Just Leaf
 sameNode _ _                         = Nothing
 
--- Gives a union-find partition of all subterms of a sequence of terms with a mapping of each subterm to their respective pointer in the partition
+-- The set of all subterms of a sequence of terms
 allSubterms :: Seq Term' -> S.Set Term'
 allSubterms terms = go terms S.empty where
   go Empty set = set
   go (t :<| ts) set = if S.size set == S.size set'
     then go ts set'
     else case t of
-           App' _ f t -> go (ts :|> f :|> t) set'
+           App' _ f a -> go (ts :|> f :|> a) set'
            All' _ h b -> go (ts :|> h :|> b) set'
            Lam' _ h b -> go (ts :|> h :|> b) set'
            Mu'  _     -> go (unroll' t :<| ts) set'
            _          -> go ts set'
     where set' = S.insert t set
 
-equalTerms :: Term -> Term -> Bool
-equalTerms term1 term2 = let
-  term1' = encode term1
-  term2' = encode term2
+-- Syntactic equality of first order trees
+equalTerms' :: Term' -> Term' -> Bool
+equalTerms' term1' term2' = runEquivM' $ go [(term1', term2')] (allSubterms (fromList [term1', term2'])) where
   go [] set = return True
   go ((term1, term2) : pairs) set = case sameNode term1 term2 of
     Just (Branch pair1 pair2) -> do
@@ -133,7 +133,10 @@ equalTerms term1 term2 = let
         else equate term1 term2 >> go (pair1 : pair2 : pairs) set
     Just Leaf -> equate term1 term2 >> go pairs set
     Nothing -> return False
-  in runEquivM' $ go [(term1', term2')] $ allSubterms $ fromList [term1', term2']
+
+-- Equality of terms. A better `eval` function is needed, since we will also have recursive term-level functions
+equalTerms :: Term -> Term -> Bool
+equalTerms term1 term2 = equalTerms' (encode (eval term1)) (encode (eval term2))
 
 -- Tests
 forall n = All n Typ
