@@ -18,6 +18,7 @@ library
                      Check
                      Pretty
                      Unify
+                     Equality
   build-depends:
     base
     , containers
@@ -27,6 +28,7 @@ library
     , text
     , vector
     , logict
+    , equivalence
   default-extensions: OverloadedStrings, MultiWayIf
 
 executable fide
