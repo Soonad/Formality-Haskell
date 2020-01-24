@@ -13,6 +13,7 @@ data Term
   | Mu Name Term
   | Any -- Type of any term
   | Rec Int
+  | Slf Name Term
   deriving (Eq, Show, Ord)
 
 hasFreeVar :: Term -> Int -> Bool
@@ -21,7 +22,8 @@ hasFreeVar term n = case term of
   All _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
   Lam _ h b    -> hasFreeVar h n || hasFreeVar b (n + 1)
   App f a      -> hasFreeVar f n || hasFreeVar a n
-  Mu _ t       -> hasFreeVar t n
+  Slf _ t      -> hasFreeVar t (n + 1)
+  Mu  _ t      -> hasFreeVar t n
   _            -> False
 
 pretty t = putStrLn $ go t [] []
@@ -45,6 +47,7 @@ pretty t = putStrLn $ go t [] []
       App f@(Mu _ _) a          ->
         concat ["((", go f vs rs, ") " , go a vs rs, ")"]
       App f a                   -> concat ["(", go f vs rs, " ", go a vs rs, ")"]
+      Slf n t                   -> concat ["${", n, "} (", go t (n : vs) rs, ")"]
       Mu n t                    -> concat ["μ", n, ". ", go t vs (n : rs)]
       Num                       -> "Number"
       Val i                     -> show i
@@ -52,12 +55,13 @@ pretty t = putStrLn $ go t [] []
 
 shiftVar :: Term -> Int -> Int -> Term
 shiftVar term inc dep = case term of
-  Var i        -> Var (if i < dep then i else (i + inc))
-  All n h b    -> All n (shiftVar h inc dep) (shiftVar b inc (dep + 1))
-  Lam n h b    -> Lam n (shiftVar h inc dep) (shiftVar b inc (dep + 1))
-  App f a      -> App (shiftVar f inc dep) (shiftVar a inc dep)
-  Mu  n t      -> Mu  n (shiftVar t inc dep)
-  x            -> x
+  Var i     -> Var (if i < dep then i else (i + inc))
+  All n h b -> All n (shiftVar h inc dep) (shiftVar b inc (dep + 1))
+  Lam n h b -> Lam n (shiftVar h inc dep) (shiftVar b inc (dep + 1))
+  App f a   -> App (shiftVar f inc dep) (shiftVar a inc dep)
+  Slf n t   -> Slf n (shiftVar t inc (dep + 1))
+  Mu  n t   -> Mu  n (shiftVar t inc dep)
+  x         -> x
 
 shiftRec :: Term -> Int -> Int -> Term
 shiftRec term inc dep = case term of
@@ -65,6 +69,7 @@ shiftRec term inc dep = case term of
   All n h b -> All n (shiftRec h inc dep) (shiftRec b inc dep)
   App f a   -> App (shiftRec f inc dep) (shiftRec a inc dep)
   Mu  n t   -> Mu  n (shiftRec t inc (dep + 1))
+  Slf n t   -> Slf n (shiftRec t inc dep)
   Rec i     -> Rec (if i < dep then i else (i + inc))
   x         -> x
 
@@ -75,6 +80,7 @@ substVar term v dep  = case term of
   Lam n h b   -> Lam n (substVar h v dep) (substVar b vV (dep + 1))
   App f a     -> App (substVar f v dep) (substVar a v dep)
   Mu  n t     -> Mu  n (substVar t vR dep)
+  Slf n t     -> Slf n (substVar t vV (dep + 1))
   x           -> x
   where
     vV = shiftVar v 1 0
@@ -86,6 +92,7 @@ substRec term v dep = case term of
   Lam n h b   -> Lam n (substRec h v dep) (substRec b vV dep)
   App f a     -> App (substRec f v dep) (substRec a v dep)
   Mu  n t     -> Mu  n (substRec t vR (dep + 1))
+  Slf n t     -> Slf n (substRec t vV dep)
   Rec i       -> if i == dep then v else Rec (i - if i > dep then 1 else 0)
   x           -> x
   where
@@ -93,13 +100,14 @@ substRec term v dep = case term of
     vR = shiftRec v 1 0
 
 maxFreeVar :: Term -> Int
-maxFreeVar term = aux term 0 where
-  aux term n = case term of
+maxFreeVar term = go term 0 where
+  go term n = case term of
     Var i        -> if i < n then 0 else i-n
-    All _ h b    -> aux h n `max` aux b (n + 1)
-    Lam _ h b    -> aux h n `max` aux b (n + 1)
-    App f a      -> aux f n `max` aux a n
-    Mu _ t       -> aux t n
+    All _ h b    -> go h n `max` go b (n + 1)
+    Lam _ h b    -> go h n `max` go b (n + 1)
+    App f a      -> go f n `max` go a n
+    Slf _ t      -> go t (n + 1)
+    Mu _ t       -> go t n
     _            -> 0
 
 substManyVar :: Term -> [Term] -> Int -> Term
@@ -120,6 +128,7 @@ eval term = case term of
       Lam _ _ b -> eval (substVar b a' 0)
       f            -> App f a'
   Mu n t    -> Mu n (eval t)
+  Slf n t   -> Slf n (eval t)
   _         -> term
 
 unroll :: Term -> Term
@@ -128,6 +137,7 @@ unroll term = case term of
   Lam n h b -> Lam n (unroll h) (unroll b)
   App f a   -> App (unroll f) (unroll a)
   Mu n t    -> substRec t (Mu n t) 0
+  Slf n t   -> Slf n (unroll t)
   _         -> term
 
 contractibleSubst :: Term -> Int -> Bool
@@ -160,9 +170,10 @@ isBohmRec t n = case t of
 isBohm :: Term -> Bool
 isBohm t = case t of
   App f a   -> isBohm f && isBohm a
-  Lam n t b -> isBohm t && isBohm b
-  All n t b -> isBohm t && isBohm b
-  Mu _ t    -> isBohmRec t 0 && isBohm t
+  Lam _ h b -> isBohm h && isBohm b
+  All _ h b -> isBohm h && isBohm b
+  Mu  _ t   -> isBohmRec t 0 && isBohm t
+  Slf _ t   -> isBohm t
   _         -> True
 
 evalBohm :: Term -> Term
@@ -176,12 +187,14 @@ evalBohm term = case term of
     (Lam _ _ b, a')             -> evalBohm (substVar b a' 0)
     (f', a')                    -> App f' a'
   Mu n t    -> Mu n (evalBohm t)
+  Slf n t   -> Slf n (evalBohm t)
   _         -> term
 
 -- Examples of evaluation
 zero = Lam "Z" Any (Lam "S" Any (Var 1))
 suc = Lam "n" Any (Lam "Z" Any (Lam "S" Any (App (Var 0) (Var 2))))
-double = Mu "double" (Lam "n" Any (App (App (Var 0) zero) (Lam "x" Any (App suc (App suc (App (Rec 0) (Var 0)))))))
+double = Mu "double" $ Lam "n" Any $ App (App (Var 0) zero) $ Lam "x" Any $ App suc $ App suc $ App (Rec 0) (Var 0)
+double'  = Lam "n" Any $ App (App (Var 0) zero) $ Mu "Rec" $  Lam "x" Any $ App suc $ App suc $ App (App (Var 0) zero) (Rec 0)
 
 two = evalBohm $ App double $ App suc zero
 four = evalBohm $ App double two
