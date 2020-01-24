@@ -1,11 +1,10 @@
+{-# LANGUAGE FlexibleContexts #-}
 module FirstOrder where
 
 import Data.Char(chr)
 import Data.Sequence hiding (reverse)
-import Control.Monad.ST
-import Control.Monad.State
-import Data.UnionFind.ST
-import qualified Data.Map.Strict as M
+import qualified Data.Set as S
+import Data.Equivalence.Monad
 import SimplerCore
 
 data Term'
@@ -108,41 +107,33 @@ sameNode Num' Num'                   = Just Leaf
 sameNode _ _                         = Nothing
 
 -- Gives a union-find partition of all subterms of a sequence of terms with a mapping of each subterm to their respective pointer in the partition
-allSubterms :: Seq Term' -> ST s (M.Map Term' (Point s Term'))
-allSubterms terms = go terms M.empty where
-  go Empty map = return map
-  go (t :<| ts) map = do
-    let alteration x = case x of
-          Nothing -> do p <- fresh t
-                        return (Just p)
-          Just p -> return (Just p)
-    map' <- M.alterF alteration t map
-    if M.size map == M.size map'
-      then go ts map'
-      else case t of
-             App' _ f t -> go (ts :|> f :|> t) map'
-             All' _ h b -> go (ts :|> h :|> b) map'
-             Lam' _ h b -> go (ts :|> h :|> b) map'
-             Mu'  _     -> go (unroll' t :<| ts) map'
-             _          -> go ts map'
+allSubterms :: Seq Term' -> S.Set Term'
+allSubterms terms = go terms S.empty where
+  go Empty set = set
+  go (t :<| ts) set = if S.size set == S.size set'
+    then go ts set'
+    else case t of
+           App' _ f t -> go (ts :|> f :|> t) set'
+           All' _ h b -> go (ts :|> h :|> b) set'
+           Lam' _ h b -> go (ts :|> h :|> b) set'
+           Mu'  _     -> go (unroll' t :<| ts) set'
+           _          -> go ts set'
+    where set' = S.insert t set
 
 equalTerms :: Term -> Term -> Bool
-equalTerms term1 term2 = runST $ do
-  let term1' = encode term1
-  let term2' = encode term2
-  map <- allSubterms $ fromList [term1', term2']
-  go [(term1', term2')] map
-  where
-    go [] map = return True
-    go ((term1, term2) : pairs) map = case sameNode term1 term2 of
-      Just (Branch pair1 pair2) -> do
-        r1 <- repr (map M.! term1)
-        r2 <- repr (map M.! term2)
-        if r1 == r2
-          then go pairs map
-          else union r1 r2 >> go (pair1 : pair2 : pairs) map
-      Just Leaf -> union (map M.! term1) (map M.! term2) >> go pairs map
-      Nothing -> return False
+equalTerms term1 term2 = let
+  term1' = encode term1
+  term2' = encode term2
+  go [] set = return True
+  go ((term1, term2) : pairs) set = case sameNode term1 term2 of
+    Just (Branch pair1 pair2) -> do
+      b <- equivalent term1 term2
+      if b
+        then go pairs set
+        else equate term1 term2 >> go (pair1 : pair2 : pairs) set
+    Just Leaf -> equate term1 term2 >> go pairs set
+    Nothing -> return False
+  in runEquivM' $ go [(term1', term2')] $ allSubterms $ fromList [term1', term2']
 
 -- Tests
 forall n = All n Typ

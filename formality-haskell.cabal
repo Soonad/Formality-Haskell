@@ -27,6 +27,7 @@ library
     , text
     , vector
     , logict
+    , equivalence
   default-extensions: OverloadedStrings, MultiWayIf
 
 executable fide
