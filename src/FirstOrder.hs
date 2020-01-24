@@ -1,6 +1,7 @@
 module FirstOrder where
 
 import Data.Char(chr)
+import Data.Sequence hiding (reverse)
 import Control.Monad.ST
 import Control.Monad.State
 import Data.UnionFind.ST
@@ -106,25 +107,30 @@ sameNode Typ' Typ'                   = Just Leaf
 sameNode Num' Num'                   = Just Leaf
 sameNode _ _                         = Nothing
 
--- The set of all subterms of a term
-allSubterms :: Term' -> M.Map Term' (ST s (Point s Term'))
-allSubterms term' = go term' M.empty where
-  go term' map = if M.size map == M.size map'
-    then map'
-    else case term' of
-      App' i f t -> go f map' <> go t map'
-      All' i h b -> go h map' <> go b map'
-      Lam' i h b -> go h map' <> go b map'
-      Mu'  t     -> go (unroll' $ Mu' t) map'
-      _          -> map'
-    where map' = M.insert term' (fresh term') map
+-- Gives a union-find partition of all subterms of a sequence of terms with a mapping of each subterm to their respective pointer in the partition
+allSubterms :: Seq Term' -> ST s (M.Map Term' (Point s Term'))
+allSubterms terms = go terms M.empty where
+  go Empty map = return map
+  go (t :<| ts) map = do
+    let alteration x = case x of
+          Nothing -> do p <- fresh t
+                        return (Just p)
+          Just p -> return (Just p)
+    map' <- M.alterF alteration t map
+    if M.size map == M.size map'
+      then go ts map'
+      else case t of
+             App' _ f t -> go (ts :|> f :|> t) map'
+             All' _ h b -> go (ts :|> h :|> b) map'
+             Lam' _ h b -> go (ts :|> h :|> b) map'
+             Mu'  _     -> go (unroll' t :<| ts) map'
+             _          -> go ts map'
 
 equalTerms :: Term -> Term -> Bool
 equalTerms term1 term2 = runST $ do
   let term1' = encode term1
   let term2' = encode term2
-  let subterms = allSubterms term1' <> allSubterms term2'
-  map <- forM subterms (\x -> x)
+  map <- allSubterms $ fromList [term1', term2']
   go [(term1', term2')] map
   where
     go [] map = return True
