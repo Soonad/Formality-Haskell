@@ -167,7 +167,7 @@ test4 = forall "a" $ Mu "X" $ impl (Var 0) $ impl (Var 0) (Rec 0)
 -- unitTerm = unitTermConstructor unitType unitTerm
 -- where
 unitTypeConstructor t s = Slf "self" $ All "P" (impl t Typ) $ impl (App (Var 0) s) $ App (Var 0) (Var 1)
-unitTermConstructor t s = Lam "P" t $ Lam "x" (App (Var 0) s) (Var 0)
+unitTermConstructor t s = Lam "P" (impl t Typ) $ Lam "x" (App (Var 0) s) (Var 0)
   
 -- We can solve this with the terms
 unitType = Mu "Unit" $ unitTypeConstructor (Rec 0) $ Mu "unit" $ unitTermConstructor (Rec 1) (Rec 0) -- ${self} (P: unitType -> Type;) -> P(unitTerm) -> P(self)
@@ -176,3 +176,19 @@ unitTerm = Mu "unit" $ unitTermConstructor unitType (Rec 0) -- (P: unitType -> T
 -- and check that indeed they solve the equations
 unitTypeEq = equalTerms unitType (unitTypeConstructor unitType unitTerm)
 unitTermEq = equalTerms unitTerm (unitTermConstructor unitType unitTerm)
+
+-- In fact we are able to generalize this result to arbitrary mutual recursive definitions. However, as we see in the following example,
+-- the solutions get exponentially bigger and more complex with an increase in the number of mutual recursive definitions.
+boolConstructor  b t f = Slf "self" $ All "P" (impl b Typ) $ impl (App (Var 0) t) $ impl (App (Var 0) f) $ App (Var 0) (Var 1)
+trueConstructor  b t f = Lam "P" (impl b Typ) $ Lam "case_true" (App (Var 0) t) $ Lam "case_false" (App (Var 1) f) (Var 1)
+falseConstructor b t f = Lam "P" (impl b Typ) $ Lam "case_true" (App (Var 0) t) $ Lam "case_false" (App (Var 1) f) (Var 0)
+
+bool  = Mu "Bool"  $ boolConstructor (Rec 0)
+  (Mu "true"  $ trueConstructor  (Rec 1) (Rec 0) (Mu "false" $ falseConstructor (Rec 2) (Rec 1) (Rec 0)))
+  (Mu "false" $ falseConstructor (Rec 1) (Mu "true"  $ trueConstructor  (Rec 2) (Rec 0) (Rec 1)) (Rec 0))
+true  = Mu "True"  $ trueConstructor  bool (Rec 0) (Mu "false" $ falseConstructor bool (Rec 1) (Rec 0))
+false = Mu "False" $ falseConstructor bool true (Rec 0)
+
+boolEq  = equalTerms bool  (boolConstructor  bool true false)
+trueEq  = equalTerms true  (trueConstructor  bool true false)
+falseEq = equalTerms false (falseConstructor bool true false)

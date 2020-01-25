@@ -33,7 +33,7 @@ pretty t = putStrLn $ go t [] []
       Var i                     -> if i < length vs then vs !! i else concat ["^", show i]
       Rec i                     -> if i < length rs then rs !! i else concat ["#", show i]
       Typ                       -> "Type"
-      All n h@Typ b             -> concat ["∀", n, ". ", go b (n : vs) rs]
+      All n h@Typ b             -> concat ["∀(", n, "). ", go b (n : vs) rs]
       All n h@(All _ _ _) b     -> if hasFreeVar b 0 then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else concat ["(", go h vs rs, ") -> ", go b (n : vs) rs]
       All n h b                 -> if hasFreeVar b 0 then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else concat [go h vs rs, " -> ", go b (n : vs) rs]
       Lam n h@Any b@(Lam _ _ _) -> concat ["(", n, ", ", tail $ go b (n : vs) rs]
@@ -48,7 +48,7 @@ pretty t = putStrLn $ go t [] []
         concat ["((", go f vs rs, ") " , go a vs rs, ")"]
       App f a                   -> concat ["(", go f vs rs, " ", go a vs rs, ")"]
       Slf n t                   -> concat ["${", n, "} (", go t (n : vs) rs, ")"]
-      Mu n t                    -> concat ["μ", n, ". ", go t vs (n : rs)]
+      Mu n t                    -> concat ["μ(", n, "). ", go t vs (n : rs)]
       Num                       -> "Number"
       Val i                     -> show i
       Any                       -> "Any"
