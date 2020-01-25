@@ -1,6 +1,9 @@
 module SimplerCore where
 
-type Name = String
+import           Data.Text                  (Text)
+import qualified Data.Text                  as T
+
+type Name = Text
 
 data Term
   = Var Int
@@ -26,31 +29,35 @@ hasFreeVar term n = case term of
   Mu  _ t      -> hasFreeVar t n
   _            -> False
 
-pretty t = putStrLn $ go t [] []
+pretty :: Term -> Text
+pretty t = go t [] []
   where
-    go :: Term -> [String] -> [String] -> String
+    show' = T.pack . show
+    cat   = T.concat
+
+    go :: Term -> [Text] -> [Text] -> Text
     go t vs rs = case t of
-      Var i                     -> if i < length vs then vs !! i else concat ["^", show i]
-      Rec i                     -> if i < length rs then rs !! i else concat ["#", show i]
+      Var i                     -> if i < length vs then vs !! i else cat ["^", show' i]
+      Rec i                     -> if i < length rs then rs !! i else cat ["#", show' i]
       Typ                       -> "Type"
-      All n h@Typ b             -> concat ["∀(", n, "). ", go b (n : vs) rs]
-      All n h@(All _ _ _) b     -> if hasFreeVar b 0 then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else concat ["(", go h vs rs, ") -> ", go b (n : vs) rs]
-      All n h b                 -> if hasFreeVar b 0 then concat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else concat [go h vs rs, " -> ", go b (n : vs) rs]
-      Lam n h@Any b@(Lam _ _ _) -> concat ["(", n, ", ", tail $ go b (n : vs) rs]
-      Lam n h@Any b             -> concat ["(", n, ") => ", go b (n : vs) rs]
-      Lam n h b@(Lam _ _ _)     -> concat ["(", n, " : ", go h vs rs, ", ", tail $ go b (n : vs) rs]
-      Lam n h b                 -> concat ["(", n, " : ", go h vs rs, ") => ", go b (n : vs) rs]
+      All n h@Typ b             -> cat ["∀(", n, "). ", go b (n : vs) rs]
+      All n h@(All _ _ _) b     -> if hasFreeVar b 0 then cat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else cat ["(", go h vs rs, ") -> ", go b (n : vs) rs]
+      All n h b                 -> if hasFreeVar b 0 then cat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else cat [go h vs rs, " -> ", go b (n : vs) rs]
+      Lam n h@Any b@(Lam _ _ _) -> cat ["(", n, ", ", T.tail $ go b (n : vs) rs]
+      Lam n h@Any b             -> cat ["(", n, ") => ", go b (n : vs) rs]
+      Lam n h b@(Lam _ _ _)     -> cat ["(", n, " : ", go h vs rs, ", ", T.tail $ go b (n : vs) rs]
+      Lam n h b                 -> cat ["(", n, " : ", go h vs rs, ") => ", go b (n : vs) rs]
       App f@(App _ _) a         ->
-        concat [init $ go f vs rs, " ", go a vs rs, ")"]
+        cat [T.init $ go f vs rs, " ", go a vs rs, ")"]
       App f@(Lam _ _ _) a       ->
-        concat ["((", go f vs rs, ") " , go a vs rs, ")"]
+        cat ["((", go f vs rs, ") " , go a vs rs, ")"]
       App f@(Mu _ _) a          ->
-        concat ["((", go f vs rs, ") " , go a vs rs, ")"]
-      App f a                   -> concat ["(", go f vs rs, " ", go a vs rs, ")"]
-      Slf n t                   -> concat ["${", n, "} (", go t (n : vs) rs, ")"]
-      Mu n t                    -> concat ["μ(", n, "). ", go t vs (n : rs)]
+        cat ["((", go f vs rs, ") " , go a vs rs, ")"]
+      App f a                   -> cat ["(", go f vs rs, " ", go a vs rs, ")"]
+      Slf n t                   -> cat ["${", n, "} (", go t (n : vs) rs, ")"]
+      Mu n t                    -> cat ["μ(", n, "). ", go t vs (n : rs)]
       Num                       -> "Number"
-      Val i                     -> show i
+      Val i                     -> show' i
       Any                       -> "Any"
 
 shiftVar :: Term -> Int -> Int -> Term
@@ -144,8 +151,8 @@ contractibleSubst :: Term -> Int -> Bool
 contractibleSubst t n = case t of
   Var i     -> i /= n
   Mu _ t    -> contractibleSubst t (n + 1)
-  Lam _ _ _ -> False 
-  App _ _   -> False 
+  Lam _ _ _ -> False
+  App _ _   -> False
   _         -> True
 
 -- The Lam and App cases could potentially be, instead

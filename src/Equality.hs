@@ -1,12 +1,16 @@
 {-# LANGUAGE FlexibleContexts #-}
-module FirstOrder where
+module Equality where
 
+import           Data.Text                  (Text)
+import qualified Data.Text                  as T
 import Data.Char(chr)
+
 import Data.Sequence hiding (reverse)
 import qualified Data.Set as S
 import Data.Equivalence.Monad
 import SimplerCore
 
+-- First order (recursive) terms
 data Term'
   = Rec' Int
   | Var' Int
@@ -52,7 +56,7 @@ unroll' term' = case term' of
   Slf' i t   -> Slf' i (unroll' t)
   _          -> term'
 
--- First order encoding
+-- Encoding of second order terms into first order terms
 encode :: Term -> Term'
 encode term = go term (\x -> x)
   where
@@ -71,8 +75,8 @@ encode term = go term (\x -> x)
     Val i     -> Val' i
     where max = maxFreeVar (sigma term)
 
-alphabet :: Int -> String
-alphabet x = reverse (go x)
+alphabet :: Int -> Text
+alphabet x = T.pack $ reverse (go x)
   where go x = chr (rest+97) : (if div <= 0 then "" else go (div-1)) where (div, rest) = divMod x 26
 
 toVar :: Int -> [Int] -> Int
@@ -168,7 +172,7 @@ test4 = forall "a" $ Mu "X" $ impl (Var 0) $ impl (Var 0) (Rec 0)
 -- where
 unitTypeConstructor t s = Slf "self" $ All "P" (impl t Typ) $ impl (App (Var 0) s) $ App (Var 0) (Var 1)
 unitTermConstructor t s = Lam "P" (impl t Typ) $ Lam "x" (App (Var 0) s) (Var 0)
-  
+
 -- We can solve this with the terms
 unitType = Mu "Unit" $ unitTypeConstructor (Rec 0) $ Mu "unit" $ unitTermConstructor (Rec 1) (Rec 0) -- ${self} (P: unitType -> Type;) -> P(unitTerm) -> P(self)
 unitTerm = Mu "unit" $ unitTermConstructor unitType (Rec 0) -- (P: unitType -> Type; x: P(unitTerm)) => x
