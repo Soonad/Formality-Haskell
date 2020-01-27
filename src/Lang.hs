@@ -23,7 +23,6 @@ import           Check hiding (newHole, _context, binder, Binder)
 import           Core
 import           Pretty
 
-<<<<<<< HEAD
 -- binders can bind variables (deBruijn) or references
 data Binder = VarB Name | RefB Name deriving (Eq, Show)
 
@@ -71,8 +70,6 @@ sc = L.space space1 (L.skipLineComment "//") empty
 sym :: Text -> Parser Text
 sym t = L.symbol sc t
 
-lit :: Text -> Parser Text
-lit t = string t
 -- symbol not followed by spaces
 lit :: Text -> Parser Text
 lit t = string t
