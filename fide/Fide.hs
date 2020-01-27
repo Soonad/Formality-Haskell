@@ -2,14 +2,15 @@ module Fide where
 
 import           Control.Applicative
 import           Control.Monad.Identity
+import           Control.Monad.RWS.Lazy                  hiding (All)
 import           Control.Monad.State.Strict
-import           Control.Monad.RWS.Lazy    hiding (All)
 import           Control.Monad.Trans
 
 import           Text.Megaparsec                         hiding (State)
 
 import           Data.List                               (isPrefixOf)
 import qualified Data.Map.Strict                         as M
+import           Data.Maybe                              (isJust)
 import           Data.Text                               (Text)
 import qualified Data.Text                               as T
 
@@ -26,7 +27,7 @@ import           Lang
 import           Pretty
 
 data FideST = FideST
-  { topDefs :: M.Map Name Term
+  { topDefs :: M.Map Name [(Recr, Term)]
   }
 
 type Repl = HaskelineT (StateT FideST IO)
@@ -61,7 +62,7 @@ quit :: Repl ()
 quit = outputTxtLn "Goodbye."
 
 data Command
-  = Let Name Term
+  = Lets Name Term Recr
   | Eval Term
   | Load FilePath
   | Quit
@@ -75,11 +76,22 @@ parseLine = sc >> line <* eof
     line = choice
       [ try $ (sym ":help" <|> sym ":h") >> return Help
       , try $ (sym ":quit" <|> sym ":q") >> return Quit
-      , try $ do sym ":let"; (n,t) <- sc >> def; return $ Let n t
+      , try $ do
+          sym ":let";
+          r <- optional (sym "type")
+          let r' = if isJust r then Equi else Norm
+          (n,t) <- sc >> def;
+          optional (sym ";")
+          return $ Lets n t r'
       , try $ do (sym ":load" <|> sym ":l")
                  (Load . T.unpack) <$> filename <* sc
       , try $ do (sym ":refs"); return Refs
-      , try $ do (n,t) <- sc >> def; return $ Let n t
+      , try $ do
+          r <- optional (sym "type")
+          let r' = if isJust r then Equi else Norm
+          (n,t) <- sc >> def;
+          optional (sym ";")
+          return $ Lets n t r'
       , Eval <$> expr
       ]
 
@@ -106,8 +118,8 @@ process line = do
         Right (defs,st,w) -> do
           liftIO $ putStrLn $ "Loaded "  ++ f
           modify $ \s -> s { topDefs = defs }
-    Right (Let n t,st,w) -> do
-      modify $ \s -> s { topDefs = M.insert n t (topDefs s) }
+    Right (Lets n t r,st,w) -> do
+      modify $ \s -> s { topDefs = extendDefs n t r (topDefs s) }
       ds <- gets topDefs
       liftIO $ putStr "Read: "
       liftIO $ print t

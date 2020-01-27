@@ -42,6 +42,9 @@ spec = do
     it "symbols following initial letter okay: \"a_\"" $ do
       parse' name "a_" `shouldBe` (Just "a_")
       parse' name "a_." `shouldBe` (Just "a_.")
+    it "reserved words fail: \"let\", \"rewrite\"" $ do
+      parse' name "let" `shouldBe` Nothing
+      parse' name "rewrite" `shouldBe` Nothing
 
   describe "Forall/Lambdas" $ do
     it "basic syntax: \"(A : Type) => A\"" $ do
@@ -64,9 +67,9 @@ spec = do
         (Just $ (Lam "A" (Hol "#0") Keep (Lam "B" (Hol "#1") Keep (Var 1))))
 
     it "anonymous arguments: \"(:Type) -> A\"" $ do
-      parse' allLam "(:Type) -> A" `shouldBe` (Just $ All "_" Typ Keep (Ref "A"))
+      parse' allLam "(:Type) -> A" `shouldBe` (Just $ All "_" Typ Keep (Ref "A" 0))
       parse' allLam "(:Type, :Type) -> A" `shouldBe` 
-        (Just $ All "_" Typ Keep (All "_" Typ Keep (Ref "A")))
+        (Just $ All "_" Typ Keep (All "_" Typ Keep (Ref "A" 0)))
 
     it "correct deBruijn indices" $ do
       parse' allLam "(A : Type, x : A) -> A" `shouldBe` 
@@ -76,32 +79,32 @@ spec = do
 
   describe "Application" $ do
     it "function style applications: \"f(a)\"" $ do
-      parse' expr "f(a)" `shouldBe` (Just (App (Ref "f") (Ref "a") Keep))
+      parse' expr "f(a)" `shouldBe` (Just (App (Ref "f" 0) (Ref "a" 0) Keep))
     it "multiple arguments: \"f(a,b,c)\"" $ do
       parse' expr "f(a,b)" `shouldBe` 
-        (Just (App (App (Ref "f") (Ref "a") Keep) (Ref "b") Keep))
+        (Just (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep))
       parse' expr "f(a,b,c)" `shouldBe` 
-        (Just (App (App (App (Ref "f") (Ref "a") Keep) (Ref "b") Keep) (Ref "c") Keep))
+        (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep) (Ref "c" 0) Keep))
     it "parenthesized arguments: \"f(a)(b)(c)\"" $ do
       parse' expr "f(a)(b)(c)" `shouldBe` 
-        (Just (App (App (App (Ref "f") (Ref "a") Keep) (Ref "b") Keep) (Ref "c") Keep))
+        (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep) (Ref "c" 0) Keep))
     it "erased parenthesized arguments: \"f(a;)(b;)(c;)\"" $ do
       parse' expr "f(a;)(b;)(c;)" `shouldBe` 
-        (Just (App (App (App (Ref "f") (Ref "a") Eras) (Ref "b") Eras) (Ref "c") Eras))
+        (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Eras) (Ref "b" 0) Eras) (Ref "c" 0) Eras))
     it "erased arguments: \"f(a;b;c;)\"" $ do
       parse' expr "f(a;b;c;)" `shouldBe` 
-        (Just (App (App (App (Ref "f") (Ref "a") Eras) (Ref "b") Eras) (Ref "c") Eras))
+        (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Eras) (Ref "b" 0) Eras) (Ref "c" 0) Eras))
     it "applying a lambda: \"((x) => x)(a,b)\"" $ do
       parse' expr "((x) => x)(a,b)" `shouldBe` 
-        (Just (App (App (Lam "x" (Hol "#0") Keep (Var 0)) (Ref "a") Keep) (Ref "b") Keep))
+        (Just (App (App (Lam "x" (Hol "#0") Keep (Var 0)) (Ref "a" 0) Keep) (Ref "b" 0) Keep))
     it "lambda style applications: \"(f a b c)\"" $ do
       parse' expr "(f a b c)" `shouldBe`
-        (Just (App (App (App (Ref "f") (Ref "a") Keep) (Ref "b") Keep) (Ref "c") Keep))
+        (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep) (Ref "c" 0) Keep))
     it "lambda style applications: \"(f (a b) c)\"" $ do
       parse' expr "(f (a b) c)" `shouldBe`
-        (Just (App (App (Ref "f") (App (Ref "a") (Ref "b") Keep) Keep) (Ref "c") Keep))
+        (Just (App (App (Ref "f" 0) (App (Ref "a" 0) (Ref "b" 0) Keep) Keep) (Ref "c" 0) Keep))
       parse' expr "(f (a (b c)))" `shouldBe`
-        (Just (App (Ref "f") (App (Ref "a") (App (Ref "b") (Ref "c") Keep) Keep) Keep))
+        (Just (App (Ref "f" 0) (App (Ref "a" 0) (App (Ref "b" 0) (Ref "c" 0) Keep) Keep) Keep))
 
   describe "Def" $ do
     it "bare-style definitions: \"a 1\"" $ do
@@ -110,10 +113,175 @@ spec = do
       parse' def "a = 1" `shouldBe` (Just ("a",Val 1))
     it "definitions with arguments: \"a(x) 1\"" $ do
       parse' def "a(x) 1" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Val 1)))
+    it "definitions with arguments: \"a(x) x\"" $ do
+      parse' def "a(x) x" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Var 0)))
     it "equals-style definitions with arguments: \"a(x) = 1\"" $ do
       parse' def "a(x) = 1" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Val 1)))
     it "definitions with types: \"a : Number 1\"" $ do
       parse' def "a : Number 1" `shouldBe` (Just ("a",Ann Num (Val 1)))
     it "definitions with types: \"a : Number = 1\"" $ do
       parse' def "a : Number = 1" `shouldBe` (Just ("a",Ann Num (Val 1)))
+    it "definitions with arguments and types: \"a(A : Type, x : A) : A = x\"" $ do
+      parse' def "a(A : Type, x : A) : A = x" `shouldBe`
+        Just ("a"
+        , Ann (All "A" Typ Keep (All "x" (Var 0) Keep (Var 1)))
+              (Lam "A" Typ Keep (Lam "x" (Var 0) Keep (Var 0)))
+        )
+
+  describe "Let" $ do
+    it "mixing lets and lambdas" $ do
+      parse' let_ "let x = 1; 2" `shouldBe`
+        (Just $ Let "x" (Val 1) Norm (Val 2))
+    it "bare reference: \"x\"" $ do
+      parse' term "x" `shouldBe` (Just (Ref "x" 0))
+    it "referencing a Let: \"let x = 0; x\"" $ do
+      parse' let_ "let x = 0; x" `shouldBe` 
+        (Just $ Let "x" (Val 0) Norm (Ref "x" 0))
+    it "name-shadowing with let: \"let x = 1; let x = 0; x\"" $ do
+      parse' let_ "let x = 1; let x = 0; x" `shouldBe`
+        (Just $ Let "x" (Val 1) Norm (Let "x" (Val 0) Norm (Ref "x" 0)))
+    it "unshadowing: \"let x = 1; let x = 0; ^x\"" $ do
+      parse' let_ "let x = 1; let x = 0; ^x" `shouldBe`
+        (Just $ Let "x" (Val 1) Norm (Let "x" (Val 0) Norm (Ref "x" 1)))
+    it "referencing out of local scope: \"let x = 1; let x = 0; ^^x\"" $ do
+      parse' let_ "let x = 1; let x = 0; ^^x" `shouldBe`
+        (Just $ Let "x" (Val 1) Norm $ Let "x" (Val 0) Norm (Ref "x" 2))
+    it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => x)(0)\"" $ do
+      parse' let_ "let x = 2; let x = 1; ((x) => x)(0)\"" `shouldBe`
+        (Just $
+          Let "x" (Val 2) Norm $ 
+          Let "x" (Val 1) Norm
+          (App (Lam "x" (Hol "#0") Keep (Var 0)) (Val 0) Keep)
+        )
+    it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => ^x)(0)\"" $ do
+      parse' let_ "let x = 2; let x = 1; ((x) => ^x)(0)\"" `shouldBe`
+        (Just $ 
+          Let "x" (Val 2) Norm $ 
+          Let "x" (Val 1) Norm $
+          (App (Lam "x" (Hol "#0") Keep (Ref "x" 0)) (Val 0) Keep)
+        )
+    it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => ^^x)(0)\"" $ do
+      parse' term "let x = 2; let x = 1; ((x) => ^^x)(0)\"" `shouldBe`
+        (Just $
+          Let "x" (Val 2) Norm $
+          Let "x" (Val 1) Norm $
+          (App (Lam "x" (Hol "#0") Keep (Ref "x" 1)) (Val 0) Keep)
+        )
+    it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => ^^^x)(0)\"" $ do
+      parse' term "let x = 2; let x = 1; ((x) => ^^^x)(0)\"" `shouldBe`
+        (Just $
+          Let "x" (Val 2) Norm $
+          Let "x" (Val 1) Norm $
+          (App (Lam "x" (Hol "#0") Keep (Ref "x" 2)) (Val 0) Keep)
+        )
+    it "mixing lets and lambdas: \"((x) => let x = 1; let x = 0; x)(2)\"" $ do
+      parse' term "((x) => let x = 1; let x = 0; x)(2)" `shouldBe`
+        (Just $
+          App
+           (Lam "x" (Hol "#0") Keep $
+            Let "x" (Val 1) Norm $
+            Let "x" (Val 0) Norm $
+            (Ref "x" 0)
+           )
+          (Val 2) Keep
+        )
+    it "mixing lets and lambdas: \"((x) => let x = 1; let x = 0; ^x)(2)\"" $ do
+      parse' term "((x) => let x = 1; let x = 0; ^x)(2)" `shouldBe`
+        (Just $
+          App
+           (Lam "x" (Hol "#0") Keep $
+            Let "x" (Val 1) Norm $
+            Let "x" (Val 0) Norm $
+            (Ref "x" 1)
+           )
+          (Val 2) Keep
+        )
+    it "mixing lets and lambdas: \"((x) => let x = 1; let x = 0; ^^x)(2)\"" $ do
+      parse' term "((x) => let x = 1; let x = 0; ^^x)(2)" `shouldBe`
+        (Just $
+          App
+           (Lam "x" (Hol "#0") Keep $
+            Let "x" (Val 1) Norm $
+            Let "x" (Val 0) Norm $
+            (Var 0)
+           )
+          (Val 2) Keep
+        )
+    it "mixing lets and lambdas: \"((x) => let x = 1; let x = 0; ^^^x)(2)\"" $ do
+      parse' term "((x) => let x = 1; let x = 0; ^^^x)(2)" `shouldBe`
+        (Just $
+          App
+           (Lam "x" (Hol "#0") Keep $
+            Let "x" (Val 1) Norm $
+            Let "x" (Val 0) Norm $
+            (Ref "x" 2)
+           )
+          (Val 2) Keep
+        )
+    it "mixing lets and lambdas: \"((x) => let x = 2; ((x) => let x = 0; x)(1)(3)\"" $ do
+      parse' term "((x) => let x = 2; ((x) => let x = 0; x)(1))(3)" `shouldBe`
+        (Just $
+          App
+          (Lam "x" (Hol "#0") Keep $ 
+           Let "x" (Val 2) Norm $
+            (App
+              (Lam "x" (Hol "#1") Keep $
+               Let "x" (Val 0) Norm 
+               (Ref "x" 0)
+              )
+              (Val 1) Keep
+            )
+          )
+          (Val 3) Keep
+         )
+    it "mixing lets and lambdas: \"((x) => let x = 2; ((x) => let x = 0; ^x)(1)(3)\"" $ do
+      parse' term "((x) => let x = 2; ((x) => let x = 0; ^x)(1))(3)" `shouldBe`
+        (Just $
+          App
+          (Lam "x" (Hol "#0") Keep $ 
+           Let "x" (Val 2) Norm $
+            (App
+              (Lam "x" (Hol "#1") Keep $
+               Let "x" (Val 0) Norm 
+               (Var 0)
+              )
+              (Val 1) Keep
+            )
+          )
+          (Val 3) Keep
+         )
+
+    it "mixing lets and lambdas: \"((x) => let x = 2; ((x) => let x = 0; ^^x)(1))(3)\"" $ do
+      parse' term "((x) => let x = 2; ((x) => let x = 0; ^^x)(1))(3)" `shouldBe`
+        (Just $
+          App
+          (Lam "x" (Hol "#0") Keep $ 
+           Let "x" (Val 2) Norm $
+            (App
+              (Lam "x" (Hol "#1") Keep $
+               Let "x" (Val 0) Norm 
+               (Ref "x" 1)
+              )
+              (Val 1) Keep
+            )
+          )
+          (Val 3) Keep
+         )
+    it "mixing lets and lambdas: \"((x) => let x = 2; ((x) => let x = 0; ^^^x)(1))(3)\"" $ do
+      parse' term "((x) => let x = 2; ((x) => let x = 0; ^^^x)(1))(3)" `shouldBe`
+        (Just $
+          App
+          (Lam "x" (Hol "#0") Keep $ 
+           Let "x" (Val 2) Norm $
+            (App
+              (Lam "x" (Hol "#1") Keep $
+               Let "x" (Val 0) Norm 
+               (Var 1)
+              )
+              (Val 1) Keep
+            )
+          )
+          (Val 3) Keep
+         )
+
 

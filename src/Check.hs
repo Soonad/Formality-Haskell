@@ -157,6 +157,11 @@ check term = case term of
     h  <- newHole
     xT <- expect (Slf "_" h) x
     return (subst h x 0)
+  Let n t r b -> do
+    tT <- check t
+    ds <- asks _defs
+--    rs <- gets _refTypes
+    local (\env -> env {_defs = extendDefs n t r ds}) $ check b
   Num   -> return Typ
   Val _ -> return Num
   Op1 o a b -> expect Num b
@@ -173,12 +178,12 @@ check term = case term of
     writeLog (m, eval (erase mT) ds, ctx)
     check x
   Hol n -> return $ Hol (n `T.append` "_type")
-  Ref n -> do
+  Ref n i -> do
     ds <- asks _defs
     rs <- gets _refTypes
-    case (ds M.!? n, rs M.!? n) of
-      (Just t, Just tT) -> return tT
-      (Just t, Nothing) -> do
+    case (defLookup n i ds, rs M.!? n) of
+      (Just (r, t), Just tT) -> return tT
+      (Just (r, t), Nothing) -> do
         tT <- check t
         modify (\s -> s { _refTypes = M.insert n tT rs })
         return tT
@@ -191,6 +196,6 @@ runCheck env cs = (\x -> runRWS x env cs) . runExceptT
 checkTerm :: Term -> (Either CheckError Term, CheckState, CheckLog)
 checkTerm = (runCheck (CheckEnv M.empty [] Keep) (CheckState 0 M.empty)) . check
 
-checkTermWithDefs :: M.Map Name Term -> Term -> (Either CheckError Term, CheckState, CheckLog)
+checkTermWithDefs :: Defs -> Term -> (Either CheckError Term, CheckState, CheckLog)
 checkTermWithDefs defs = (runCheck (CheckEnv defs [] Keep) (CheckState 0 M.empty)) . check
 

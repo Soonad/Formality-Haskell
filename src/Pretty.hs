@@ -32,6 +32,7 @@ pretty t = go t []
                         cat ["((", go f s, ") " , go a s, ")"]
       App f a Eras   -> cat ["(", go f s, " " , go a s, ";)"]
       App f a e      -> cat ["(", go f s, " ", go a s, ")"]
+      Let n t r b    -> cat ["let ", n, " = ", go t s, ";", go b s]
       Slf n t        -> cat ["${", n, "}", go t s]
       New t x        -> cat ["new(", go t s, ")", go x s]
       Use x          -> cat ["use(", go x s, ")"]
@@ -43,5 +44,5 @@ pretty t = go t []
       Ann x y        -> cat [go y s, " :: ", go x s]
       Log x y        -> cat ["log(", go x s, "); ", go y s]
       Hol n          -> cat ["?", n]
-      Ref n          -> n
+      Ref n i        -> cat (replicate i "^") `T.append` n
 

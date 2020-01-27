@@ -16,98 +16,98 @@ import           Control.Monad.Trans
 import           Core
 import           Check
 
-substHole :: Term -> Name -> Term -> Term
-substHole new nam t = let go = substHole new nam in case t of
-  All n h e b -> All n (go h) e (go b)
-  Lam n h e b -> Lam n (go h) e (go b)
-  App f a e   -> App (go f) (go a) e
-  Slf n t     -> Slf n (go t)
-  New t x     -> New (go t) (go x)
-  Use x       -> Use (go x)
-  Op1 o a b   -> Op1 o a (go b)
-  Op2 o a b   -> Op2 o (go a) (go b)
-  Ite c t f   -> Ite (go c) (go t) (go f)
-  Hol n       -> if nam == n then new else Hol n
-  Ann t x     -> Ann (go t) (go x)
-  Log m x     -> Log (go m) (go x)
-  x           -> x
-
-holes :: Term -> Set Name
-holes t = go t Set.empty
-  where
-    go t s = case t of
-      All _ h _ b -> go h s <> go b s
-      Lam _ h _ b -> go h s <> go b s
-      App f a _   -> go f s <> go a s
-      Slf _ t     -> go t s
-      New t x     -> go t s <> go x s
-      Use x       -> go x s
-      Op1 _ _ b   -> go b s
-      Op2 _ a b   -> go a s <> go b s
-      Ite c t f   -> go c s <> go t s <> go f s
-      Ann t x     -> go t s <> go x s
-      Log m x     -> go m s <> go x s
-      _           -> s
-
-isClosed :: Term -> Bool
-isClosed t = go t 0
-  where
-    go t d = case t of
-      Var i       -> i < d
-      All n h e b -> go h d && go b (d + 1)
-      Lam n h e b -> go h d && go b (d + 1)
-      App f a e   -> go f d && go a d
-      Slf n t     -> go t (d + 1)
-      New t x     -> go t d && go x d
-      Use x       -> go x d
-      Op1 o a b   -> go b d
-      Op2 o a b   -> go a d && go b d
-      Ite c t f   -> go c d && go t d && go f d
-      Ann t x     -> go t d && go x d
-      Log m x     -> go m d && go x d
-      Ref n       -> False
-      _           -> True
-
-isStuck :: Term -> Bool
-isStuck (Hol _)     = True
-isStuck (App f _ _) = isStuck f
-isStuck _           = False
-
-peelApTelescope :: Term -> (Term, [Term])
-peelApTelescope t = go t []
-  where
-    go (App f a _) as = go f (a : as)
-    go t as           = (t, as)
-
-applyApTelescope :: Term -> [Term] -> Term
-applyApTelescope = foldl (\x y -> App x y Keep)
-
---type Constraint = (Term, Term)
-
-type Subst = M.Map Name Term
-
-data UnifyEnv = UnifyEnv
-data UnifyLog = UnifyLog
-
-instance Semigroup UnifyLog where
-  (<>) _ _ = UnifyLog
-
-instance Monoid UnifyLog where
-  mappend = (<>)
-  mempty = UnifyLog
-
-data UnifyState = UnifyState
-  { _varCount :: Int
-  } deriving (Show, Eq)
-
-type Unify = ExceptT UnifyError (RWS UnifyEnv UnifyLog UnifyState)
-
-data UnifyError
-  = UnificationMismatch Term Term
-  deriving Show
-
-evalEnv :: CheckEnv -> Term -> Term
-evalEnv env t = eval t M.empty
+--substHole :: Term -> Name -> Term -> Term
+--substHole new nam t = let go = substHole new nam in case t of
+--  All n h e b -> All n (go h) e (go b)
+--  Lam n h e b -> Lam n (go h) e (go b)
+--  App f a e   -> App (go f) (go a) e
+--  Slf n t     -> Slf n (go t)
+--  New t x     -> New (go t) (go x)
+--  Use x       -> Use (go x)
+--  Op1 o a b   -> Op1 o a (go b)
+--  Op2 o a b   -> Op2 o (go a) (go b)
+--  Ite c t f   -> Ite (go c) (go t) (go f)
+--  Hol n       -> if nam == n then new else Hol n
+--  Ann t x     -> Ann (go t) (go x)
+--  Log m x     -> Log (go m) (go x)
+--  x           -> x
+--
+--holes :: Term -> Set Name
+--holes t = go t Set.empty
+--  where
+--    go t s = case t of
+--      All _ h _ b -> go h s <> go b s
+--      Lam _ h _ b -> go h s <> go b s
+--      App f a _   -> go f s <> go a s
+--      Slf _ t     -> go t s
+--      New t x     -> go t s <> go x s
+--      Use x       -> go x s
+--      Op1 _ _ b   -> go b s
+--      Op2 _ a b   -> go a s <> go b s
+--      Ite c t f   -> go c s <> go t s <> go f s
+--      Ann t x     -> go t s <> go x s
+--      Log m x     -> go m s <> go x s
+--      _           -> s
+--
+--isClosed :: Term -> Bool
+--isClosed t = go t 0
+--  where
+--    go t d = case t of
+--      Var i       -> i < d
+--      All n h e b -> go h d && go b (d + 1)
+--      Lam n h e b -> go h d && go b (d + 1)
+--      App f a e   -> go f d && go a d
+--      Slf n t     -> go t (d + 1)
+--      New t x     -> go t d && go x d
+--      Use x       -> go x d
+--      Op1 o a b   -> go b d
+--      Op2 o a b   -> go a d && go b d
+--      Ite c t f   -> go c d && go t d && go f d
+--      Ann t x     -> go t d && go x d
+--      Log m x     -> go m d && go x d
+--      Ref n i     -> False
+--      _           -> True
+--
+--isStuck :: Term -> Bool
+--isStuck (Hol _)     = True
+--isStuck (App f _ _) = isStuck f
+--isStuck _           = False
+--
+--peelApTelescope :: Term -> (Term, [Term])
+--peelApTelescope t = go t []
+--  where
+--    go (App f a _) as = go f (a : as)
+--    go t as           = (t, as)
+--
+--applyApTelescope :: Term -> [Term] -> Term
+--applyApTelescope = foldl (\x y -> App x y Keep)
+--
+----type Constraint = (Term, Term)
+--
+--type Subst = M.Map Name Term
+--
+--data UnifyEnv = UnifyEnv
+--data UnifyLog = UnifyLog
+--
+--instance Semigroup UnifyLog where
+--  (<>) _ _ = UnifyLog
+--
+--instance Monoid UnifyLog where
+--  mappend = (<>)
+--  mempty = UnifyLog
+--
+--data UnifyState = UnifyState
+--  { _varCount :: Int
+--  } deriving (Show, Eq)
+--
+--type Unify = ExceptT UnifyError (RWS UnifyEnv UnifyLog UnifyState)
+--
+--data UnifyError
+--  = UnificationMismatch Term Term
+--  deriving Show
+--
+--evalEnv :: CheckEnv -> Term -> Term
+--evalEnv env t = eval t M.empty
 
 -- Rigid-Rigid constraint
 --simplify :: Constraint -> Unify (Set Constraint)

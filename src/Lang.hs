@@ -19,31 +19,23 @@ import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Text.Megaparsec.Debug
 
-import           Check hiding (newHole, _context, binder)
+import           Check hiding (newHole, _context, binder, Binder)
 import           Core
 import           Pretty
 
---type Scope = M.Map Name Term
+data Binder = VarB Name | RefB Name deriving (Eq, Show)
 
 data ParseState = ParseState { _holeCount :: Int } deriving Show
-data ParseEnv = ParseEnv { _context :: [Name] } deriving Show
+data ParseEnv = ParseEnv { _context :: [Binder] } deriving Show
 
-binders :: [Name] -> Parser a -> Parser a
-binders ns p = local (\e -> e { _context = (reverse ns) ++ _context e }) p
+binders :: [Binder] -> Parser a -> Parser a
+binders bs p = local (\e -> e { _context = (reverse bs) ++ _context e }) p
 
 type Parser = RWST ParseEnv () ParseState (ParsecT Void Text Identity)
 
---instance 
-
 parserTest :: Show a => Parser a -> Text -> IO ()
-parserTest p s = print $ 
+parserTest p s = print $
   runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
-
--- for `dbg`
---type Parser = ParsecT Void Text (State Ctx)
---
---parserTest :: Show a => Parser a -> Text -> IO ()
---parserTest p s = print $ runState (runParserT p "" s) (Ctx [] 0)
 
 -- space consumer
 sc :: Parser ()
@@ -51,7 +43,7 @@ sc = L.space space1 (L.skipLineComment "//") empty
 
 sym :: Text -> Parser Text
 sym t = L.symbol sc t
---
+
 lit :: Text -> Parser Text
 lit t = string t
 
@@ -59,6 +51,7 @@ evalTest :: Parser Term -> Text -> IO ()
 evalTest p s = do
   let Identity (Right (a,st,w)) =
         runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
+  print $ a
   print $ eval a M.empty
 
 name :: Parser Text
@@ -66,18 +59,30 @@ name = do
   us <- many (lit "_")
   n  <- if us == [] then letterChar else alphaNumChar
   ns <- many (alphaNumChar <|> satisfy (\x -> elem x nameSymbol))
-  return $ T.concat [T.concat us, T.pack (n : ns)]
+  let nam = T.concat [T.concat us, T.pack (n : ns)]
+  if nam `elem` reservedWords then fail "reservedWord" else return nam
   where
     nameSymbol :: [Char]
     nameSymbol = "_.#-@/'"
+    reservedWords :: [Text]
+    reservedWords = ["let", "rewrite"]
 
 refVar :: Parser Term
 refVar = do
-  bs <- asks _context
+  ctx <- asks _context
+  is <- optional (some (lit "^"))
   n <- name
-  case findIndex (\x -> x == n) bs of
-    Just i -> return $ Var i
-    _      -> return $ Ref n
+  let carets = (maybe 0 id (length <$> is))
+  return $ go ctx carets 0 0 n
+  where
+    go (x:xs) cs varIndex refCount n
+      | VarB m <- x, n == m, cs == 0 = Var varIndex
+      | VarB m <- x, n == m          = go xs (cs - 1) (varIndex + 1) refCount n
+      | VarB m <- x, n /= m          = go xs cs (varIndex + 1) refCount n
+      | RefB m <- x, n == m, cs == 0 = Ref n refCount
+      | RefB m <- x, n == m          = go xs (cs - 1) varIndex (refCount + 1) n
+      | otherwise                    = go xs cs varIndex refCount n
+    go [] cs varIndex refCount n     = Ref n (cs + refCount)
 
 num :: Parser Term
 num = lit "Number" >> return Num
@@ -94,7 +99,7 @@ allLam = do
   sc
   ctor <- (sym "->" >> return All) <|> (sym "=>" >> return Lam)
   sc
-  body <- binders ((\(x,y,z) -> x) <$> bs) expr
+  body <- binders ((\(x,y,z) -> VarB x) <$> bs) expr
   return $ foldr (\(n,t,e) x -> ctor n t e x) body bs
 
 binds :: Parser [(Name, Term, Eras)]
@@ -107,8 +112,8 @@ binds = sym "(" >> go
       (b, bT) <- binderAndType
       e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
       case e of
-        Just ";" -> (do bs <- binders [b] $ go; return $ (b,bT,Eras) : bs)
-        _        -> (do bs <- binders [b] $ go; return $ (b,bT,Keep) : bs)
+        Just ";" -> (do bs <- binders [VarB b] $ go; return $ (b,bT,Eras) : bs)
+        _        -> (do bs <- binders [VarB b] $ go; return $ (b,bT,Keep) : bs)
 
     binderAndType :: Parser (Name, Term)
     binderAndType = do
@@ -142,7 +147,7 @@ slf = do
   sym "${"
   n <- name <* sc
   sym "}"
-  t <- binders [n] term
+  t <- binders [VarB n] term
   return $ Slf n t
 
 new :: Parser Term
@@ -168,6 +173,7 @@ term :: Parser Term
 term = do
   t <- choice
       [ try $ allLam
+      , try $ let_
       , try $ typ
       , try $ num
       , try $ slf
@@ -232,22 +238,23 @@ opr x = do
     "+"  -> return $ Op2 ADD x y
     "-"  -> return $ Op2 SUB x y
     "*"  -> return $ Op2 MUL x y
-    f    -> return $ App (App (Ref f) x Keep) y Keep
+    "==" -> return $ Op2 EQL x y
+    f    -> return $ App (App (Ref f 0) x Keep) y Keep
 
 expr :: Parser Term
 expr = do
   ts <- some term
   return $ foldl1 (\x y -> App x y Keep) ts
 
-
 def :: Parser (Name, Term)
-def = do
+def = do 
   n  <- name
   bs <- (optional $ binds)
   sc
-  t  <- optional (sym ":" >> term <* sc)
+  let ns = maybe [] (fmap (\(a,b,c) -> VarB a)) bs
+  t  <- optional (sym ":" >> binders ns term <* sc)
   optional (sym "=")
-  d  <- expr
+  d  <- binders ns expr
   case (bs, t) of
     (Nothing, Nothing) -> return (n, d)
     (Nothing, Just t)  -> return $ (n, Ann t d)
@@ -257,10 +264,24 @@ def = do
           trm = foldr (\(n,t,e) x -> Lam n t e x)  d bs
        in return $ (n, Ann typ trm)
 
-file :: Parser (M.Map Name Term)
-file = do
+let_ :: Parser Term
+let_ = do
+  sym "let"
+  r <- optional (sym "type")
+  let r' = if isJust r then Equi else Norm
+  (n, t) <- def
   sc
-  ds <- (sepEndBy1 def sc)
-  eof
-  return $ M.fromList ds
+  optional (sym ";")
+  b <- binders [RefB n] $ expr
+  return $ Let n t r' b
+
+file :: Parser (M.Map Name [(Recr,Term)])
+file = do; sc; ds <- (sepEndBy1 def' sc); eof; return $ M.fromList ds
+  where
+    def' :: Parser (Name, [(Recr,Term)])
+    def' = do
+      r <- optional (sym "type")
+      let r' = if isJust r then Equi else Norm
+      (n,d) <- def
+      return $ (n,[(r', d)])
 
