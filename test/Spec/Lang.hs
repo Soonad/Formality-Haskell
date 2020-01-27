@@ -76,6 +76,10 @@ spec = do
         (Just $ (All "A" Typ Keep (All "x" (Var 0) Keep (Var 1))))
       parse' allLam "(A : Type, B : Type, x : A) -> A" `shouldBe` 
         (Just $ (All "A" Typ Keep (All "B" Typ Keep (All "x" (Var 1) Keep (Var 2)))))
+      parse' allLam "(x : Number, Q : (y : Number) -> Type) -> Q(x)" `shouldBe`
+        (Just $ All "x" Num Keep (All "Q" (All "y" Num Keep Typ) Keep (App (Var 0) (Var 1) Keep)))
+      parse' allLam "(x : Number, Q : Number -> Type) -> Q(x)" `shouldBe` 
+        (Just $ All "x" Num Keep (All "Q" (All "_" Num Keep Typ) Keep (App (Var 0) (Var 1) Keep)))
 
   describe "Application" $ do
     it "function style applications: \"f(a)\"" $ do

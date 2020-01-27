@@ -19,6 +19,7 @@ library
                      Pretty
                      Unify
                      Equality
+                     --SimplerCore
   build-depends:
     base
     , containers
@@ -29,7 +30,7 @@ library
     , vector
     , logict
     , equivalence
-  default-extensions: OverloadedStrings, MultiWayIf
+  default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
 
 executable fide
   main-is: Main.hs
@@ -50,7 +51,7 @@ executable fide
                  Check
                  Pretty
                  HaskelineT
-  default-extensions: OverloadedStrings, MultiWayIf
+  default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
   hs-source-dirs: fide src
 
 test-suite test
@@ -69,10 +70,13 @@ test-suite test
     , vector
     , crackNum
     , mtl
-  default-extensions: OverloadedStrings, MultiWayIf
+  default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
   other-modules: Runtime.Net
                 , Spec.Lang
                 , Spec.Net
+                , Spec.Core
                 , Core
                 , Lang
+                , Check
+                , Pretty
 
