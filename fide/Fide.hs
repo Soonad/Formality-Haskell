@@ -27,7 +27,7 @@ import           Lang
 import           Pretty
 
 data FideST = FideST
-  { topDefs :: M.Map Name [(Recr, Term)]
+  { topDefs :: M.Map Name [Term]
   }
 
 type Repl = HaskelineT (StateT FideST IO)
@@ -62,7 +62,7 @@ quit :: Repl ()
 quit = outputTxtLn "Goodbye."
 
 data Command
-  = Lets Name Term Recr
+  = Lets Name Term
   | Eval Term
   | Load FilePath
   | Quit
@@ -78,20 +78,16 @@ parseLine = sc >> line <* eof
       , try $ (sym ":quit" <|> sym ":q") >> return Quit
       , try $ do
           sym ":let";
-          r <- optional (sym "type")
-          let r' = if isJust r then Equi else Norm
           (n,t) <- sc >> def;
           optional (sym ";")
-          return $ Lets n t r'
+          return $ Lets n t
       , try $ do (sym ":load" <|> sym ":l")
                  (Load . T.unpack) <$> filename <* sc
       , try $ do (sym ":refs"); return Refs
       , try $ do
-          r <- optional (sym "type")
-          let r' = if isJust r then Equi else Norm
           (n,t) <- sc >> def;
           optional (sym ";")
-          return $ Lets n t r'
+          return $ Lets n t
       , Eval <$> expr
       ]
 
@@ -117,9 +113,9 @@ process line = do
         Left e      -> liftIO $ print e
         Right (defs,st,w) -> do
           liftIO $ putStrLn $ "Loaded "  ++ f
-          modify $ \s -> s { topDefs = defs }
-    Right (Lets n t r,st,w) -> do
-      modify $ \s -> s { topDefs = extendDefs n t r (topDefs s) }
+          modify $ \s -> s { topDefs = pure <$> defs }
+    Right (Lets n t,st,w) -> do
+      modify $ \s -> s { topDefs = extendDefs [(n,t)] (topDefs s) }
       ds <- gets topDefs
       liftIO $ putStr "Read: "
       liftIO $ print t

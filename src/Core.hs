@@ -1,20 +1,22 @@
 module Core where
 
-import qualified Data.Map.Strict as M
-import           Data.Text                  (Text)
-import qualified Data.Text                  as T
+import qualified Data.Map.Strict        as M
+import qualified Data.Set               as Set
+import           Data.Text              (Text)
+import qualified Data.Text              as T
 
-import Control.Monad.Reader
-import Control.Monad.State
-import Control.Monad.Except
-
+import           Control.Monad.Except
+import           Control.Monad.Reader
+import           Control.Monad.RWS.Lazy hiding (All)
+import           Control.Monad.State
 
 type Name = Text
-data Recr = Equi | Norm deriving (Show, Eq, Ord)
 
 data Eras = Eras  -- Erase from runtime
           | Keep  -- Keep at runtime
           deriving (Show, Eq, Ord)
+
+type Bind = [(Name, Term)]
 
 data Term
   = Var Int                    -- Variable
@@ -25,7 +27,7 @@ data Term
   | Slf Name Term              -- Self-type
   | New Term Term              -- Self-type introduction
   | Use Term                   -- Self-type elimination
-  | Let Name Term Recr Term    -- Recursive locally scoped definition
+  | Let Bind Term              -- Recursive locally scoped definition
   | Num                        -- Number type
   | Val Int                    -- Number Value
   | Op1 Op Int Term            -- Unary operation (curried)
@@ -52,7 +54,7 @@ shift term inc dep = let go x = shift x inc dep in case term of
   Slf n t      -> Slf n (shift t inc (dep + 1))
   New t x      -> New (go t) (go x)
   Use x        -> Use (go x)
-  Let n t r b  -> Let n (go t) r (go b)
+  Let bs t     -> Let ((fmap go) <$> bs) (go t)
   Num          -> Num
   Val n        -> Val n
   Op1 o a b    -> Op1 o a (go b)
@@ -66,7 +68,7 @@ shift term inc dep = let go x = shift x inc dep in case term of
 -- substitute a value for an index at a certain depth
 subst :: Term -> Term -> Int -> Term
 subst term v dep =
-  let v'   = shift v 1 0 
+  let v'   = shift v 1 0
       go x = subst x v dep
   in
   case term of
@@ -78,7 +80,7 @@ subst term v dep =
   Slf n t     -> Slf n (subst t v' (dep + 1))
   New t x     -> New (go t) (go x)
   Use x       -> Use (go x)
-  Let n t r b -> Let n (go t) r (go b)
+  Let bs t    -> Let ((fmap go) <$> bs) (go t)
   Num         -> Num
   Val n       -> Val n
   Op1 o a b   -> Op1 o a (go b)
@@ -96,61 +98,19 @@ substMany t vals d = go t vals d 0
     go t (v:vs) d i = go (subst t (shift v (l - i) 0) (d + l - i)) vs d (i + 1)
     go t [] d i = t
 
-type Defs = M.Map Name [(Recr, Term)]
+type Defs = M.Map Name [Term]
 
-defLookup :: Name -> Int -> Defs -> Maybe (Recr,Term)
+defLookup :: Name -> Int -> Defs -> Maybe Term
 defLookup n i defs = case M.lookup n defs of
   Just xs -> if i >= 0 && i < length xs then Just $ xs !! i else Nothing
   Nothing -> Nothing
 
 dereference :: Name -> Int -> Defs -> Term
-dereference n i defs = case M.lookup n defs of
-  Just xs -> if i >= 0 && i < length xs then snd (xs !! i) else Ref n i
-  Nothing -> Ref n i
+dereference n i defs = maybe (Ref n i) id (defLookup n i defs)
 
-hasFreeVar :: Term -> Defs -> Bool
-hasFreeVar term defs = go term 0
-  where
-    go term n = case term of
-      Var i        -> i == n
-      All _ h _ b  -> go h n || go b (n + 1)
-      Lam _ h _ b  -> go h n || go b (n + 1)
-      App f a _    -> go f n || go a n
-      Slf _ t      -> go t (n + 1)
-      New t x      -> go t n || go x n
-      Use x        -> go x n
-      Let _ t r b  -> go t n || go b n
-      Op1 o a b    -> go b n
-      Op2 o a b    -> go a n || go b n
-      Ite c t f    -> go c n || go t n || go f n
-      Ann t x      -> go t n || go x n
-      Log m x      -> go m n || go x n
-      Ref n i      -> case dereference n i defs of
-        Ref n i    -> False
-        x          -> go x 0
-      _            -> False
-
-maxFreeVar :: Term -> Int
-maxFreeVar term = go term 0
-  where
-    go term n = case term of
-      Var i        -> if i < n then 0 else i-n
-      All _ h _ b  -> go h n `max` go b (n + 1)
-      Lam _ h _ b  -> go h n `max` go b (n + 1)
-      App f a _    -> go f n `max` go a n
-      Slf _ t      -> go t (n + 1)
-      New t x      -> go t n `max` go x n
-      Use x        -> go x n
-      Let _ t r b  -> go t n `max` go b n
-      Op1 o a b    -> go b n
-      Op2 o a b    -> go a n `max` go b n
-      Ite c t f    -> go c n `max` go t n `max` go f n
-      Ann t x      -> go t n `max` go x n
-      Log m x      -> go m n `max` go x n
-      _            -> 0
-
-extendDefs :: Name -> Term -> Recr -> Defs -> Defs
-extendDefs n t r defs = M.insertWith ((++)) n [(r,t)] defs
+extendDefs :: [(Name,Term)]-> Defs -> Defs
+extendDefs ((n,t):ds) defs = extendDefs ds (M.insertWith ((++)) n [t] defs)
+extendDefs []         defs = defs
 
 -- deBruijn
 eval :: Term -> Defs -> Term
@@ -165,7 +125,7 @@ eval term defs = go term defs
       f            -> App f (go a defs) e
     New t x      -> go x defs
     Use x        -> go x defs
-    Let n t r b  -> go b (extendDefs n t r defs)
+    Let bs t     -> go t (extendDefs bs defs)
     Op1 o a b    -> case go b defs of
       Val n -> Val $ op o a n
       x     -> Op1 o a x
@@ -206,6 +166,7 @@ erase term = case term of
   Slf n t        -> Slf n (erase t)
   New t x        -> erase x
   Use x          -> erase x
+  Let bs t       -> Let ((fmap erase) <$> bs) (erase t)
   Ann t x        -> erase x
   Log m x        -> Log (erase m) (erase x)
-  _ -> term
+  _              -> term

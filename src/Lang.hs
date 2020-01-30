@@ -42,11 +42,10 @@ binders bs p = local (\e -> e { _context = (reverse bs) ++ _context e }) p
 type Parser = RWST ParseEnv () ParseState (ParsecT Void Text Identity)
 
 -- top level parser with default env and state
-parseDefault :: Show a => Parser a -> Text
-             -> Identity
-                  (Either (ParseErrorBundle Text Void)
-                          (a, ParseState, ())
-                  )
+parseDefault :: Show a 
+             => Parser a 
+             -> Text
+             -> Identity (Either (ParseErrorBundle Text Void) (a, ParseState, ()))
 parseDefault p s = runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
 
 -- a useful testing function
@@ -96,7 +95,7 @@ refVar = do
   let carets = (maybe 0 id (length <$> is))
   return $ go ctx carets 0 0 n
   where
-    go (x:xs) cs varIndex refCount n
+    go(x:xs) cs varIndex refCount n
       | VarB m <- x, n == m, cs == 0 = Var varIndex
       | VarB m <- x, n == m          = go xs (cs - 1) (varIndex + 1) refCount n
       | VarB m <- x, n /= m          = go xs cs (varIndex + 1) refCount n
@@ -308,21 +307,24 @@ def = do
 let_ :: Parser Term
 let_ = do
   sym "let"
-  r <- optional (sym "type")
-  let r' = if isJust r then Equi else Norm
-  (n, t) <- def
-  sc
-  optional (sym ";")
-  b <- binders [RefB n] $ expr
-  return $ Let n t r' b
+  ds <- lets <|> (pure <$> letDef)
+  t <- binders ((RefB . fst) <$> ds) $ expr
+  return $ Let ds t
+  where
+    letDef :: Parser (Name,Term)
+    letDef = def <* sepr
 
-file :: Parser (M.Map Name [(Recr,Term)])
+    lets :: Parser [(Name, Term)]
+    lets = sym "(" >> some letDef <* (lit ")" >> sepr)
+
+    sepr :: Parser (Maybe Text)
+    sepr = sc >> optional (sym ";" <|> sym ",")
+
+file :: Parser (M.Map Name Term)
 file = do; sc; ds <- (sepEndBy1 def' sc); eof; return $ M.fromList ds
   where
-    def' :: Parser (Name, [(Recr,Term)])
+    def' :: Parser (Name, Term)
     def' = do
-      r <- optional (sym "type")
-      let r' = if isJust r then Equi else Norm
       (n,d) <- def
-      return $ (n,[(r', d)])
+      return $ (n,d)
 

@@ -140,11 +140,11 @@ check term = case term of
     h  <- newHole
     xT <- expect (Slf "_" h) x
     return (subst h x 0)
-  Let n t r b -> do
-    tT <- check t
-    ds <- asks _defs
+--  Let n t r b -> do
+--    tT <- check t
+--    ds <- asks _defs
 --    rs <- gets _refTypes
-    local (\env -> env {_defs = extendDefs n t r ds}) $ check b
+--    local (\env -> env {_defs = extendDefs n t r ds}) $ check b
   Num   -> return Typ
   Val _ -> return Num
   Op1 o a b -> expect Num b
@@ -165,8 +165,8 @@ check term = case term of
     ds <- asks _defs
     rs <- gets _refTypes
     case (defLookup n i ds, rs M.!? n) of
-      (Just (r, t), Just tT) -> return tT
-      (Just (r, t), Nothing) -> do
+      (Just t, Just tT) -> return tT
+      (Just t , Nothing) -> do
         tT <- check t
         modify (\s -> s { _refTypes = M.insert n tT rs })
         return tT

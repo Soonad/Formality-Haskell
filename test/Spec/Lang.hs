@@ -133,159 +133,112 @@ spec = do
         )
 
   describe "Let" $ do
-    it "mixing lets and lambdas" $ do
+    it "simple let" $ do
       parse' let_ "let x = 1; 2" `shouldBe`
-        (Just $ Let "x" (Val 1) Norm (Val 2))
+        (Just $ Let [("x",Val 1)]  (Val 2))
     it "bare reference: \"x\"" $ do
       parse' term "x" `shouldBe` (Just (Ref "x" 0))
     it "referencing a Let: \"let x = 0; x\"" $ do
       parse' let_ "let x = 0; x" `shouldBe` 
-        (Just $ Let "x" (Val 0) Norm (Ref "x" 0))
+        (Just $ Let [("x",Val 0)]  (Ref "x" 0))
     it "name-shadowing with let: \"let x = 1; let x = 0; x\"" $ do
       parse' let_ "let x = 1; let x = 0; x" `shouldBe`
-        (Just $ Let "x" (Val 1) Norm (Let "x" (Val 0) Norm (Ref "x" 0)))
+        (Just $ Let [("x",Val 1)]  (Let [("x",Val 0)]  (Ref "x" 0)))
     it "unshadowing: \"let x = 1; let x = 0; ^x\"" $ do
       parse' let_ "let x = 1; let x = 0; ^x" `shouldBe`
-        (Just $ Let "x" (Val 1) Norm (Let "x" (Val 0) Norm (Ref "x" 1)))
+        (Just $ Let [("x",Val 1)]  (Let [("x",Val 0)]  (Ref "x" 1)))
     it "referencing out of local scope: \"let x = 1; let x = 0; ^^x\"" $ do
       parse' let_ "let x = 1; let x = 0; ^^x" `shouldBe`
-        (Just $ Let "x" (Val 1) Norm $ Let "x" (Val 0) Norm (Ref "x" 2))
-    it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => x)(0)\"" $ do
-      parse' let_ "let x = 2; let x = 1; ((x) => x)(0)\"" `shouldBe`
-        (Just $
-          Let "x" (Val 2) Norm $ 
-          Let "x" (Val 1) Norm
-          (App (Lam "x" (Hol "#0") Keep (Var 0)) (Val 0) Keep)
-        )
-    it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => ^x)(0)\"" $ do
-      parse' let_ "let x = 2; let x = 1; ((x) => ^x)(0)\"" `shouldBe`
-        (Just $ 
-          Let "x" (Val 2) Norm $ 
-          Let "x" (Val 1) Norm $
-          (App (Lam "x" (Hol "#0") Keep (Ref "x" 0)) (Val 0) Keep)
-        )
-    it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => ^^x)(0)\"" $ do
-      parse' term "let x = 2; let x = 1; ((x) => ^^x)(0)\"" `shouldBe`
-        (Just $
-          Let "x" (Val 2) Norm $
-          Let "x" (Val 1) Norm $
-          (App (Lam "x" (Hol "#0") Keep (Ref "x" 1)) (Val 0) Keep)
-        )
-    it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => ^^^x)(0)\"" $ do
-      parse' term "let x = 2; let x = 1; ((x) => ^^^x)(0)\"" `shouldBe`
-        (Just $
-          Let "x" (Val 2) Norm $
-          Let "x" (Val 1) Norm $
-          (App (Lam "x" (Hol "#0") Keep (Ref "x" 2)) (Val 0) Keep)
-        )
-    it "mixing lets and lambdas: \"((x) => let x = 1; let x = 0; x)(2)\"" $ do
-      parse' term "((x) => let x = 1; let x = 0; x)(2)" `shouldBe`
-        (Just $
-          App
-           (Lam "x" (Hol "#0") Keep $
-            Let "x" (Val 1) Norm $
-            Let "x" (Val 0) Norm $
-            (Ref "x" 0)
-           )
-          (Val 2) Keep
-        )
-    it "mixing lets and lambdas: \"((x) => let x = 1; let x = 0; ^x)(2)\"" $ do
-      parse' term "((x) => let x = 1; let x = 0; ^x)(2)" `shouldBe`
-        (Just $
-          App
-           (Lam "x" (Hol "#0") Keep $
-            Let "x" (Val 1) Norm $
-            Let "x" (Val 0) Norm $
-            (Ref "x" 1)
-           )
-          (Val 2) Keep
-        )
-    it "mixing lets and lambdas: \"((x) => let x = 1; let x = 0; ^^x)(2)\"" $ do
-      parse' term "((x) => let x = 1; let x = 0; ^^x)(2)" `shouldBe`
-        (Just $
-          App
-           (Lam "x" (Hol "#0") Keep $
-            Let "x" (Val 1) Norm $
-            Let "x" (Val 0) Norm $
-            (Var 0)
-           )
-          (Val 2) Keep
-        )
-    it "mixing lets and lambdas: \"((x) => let x = 1; let x = 0; ^^^x)(2)\"" $ do
-      parse' term "((x) => let x = 1; let x = 0; ^^^x)(2)" `shouldBe`
-        (Just $
-          App
-           (Lam "x" (Hol "#0") Keep $
-            Let "x" (Val 1) Norm $
-            Let "x" (Val 0) Norm $
-            (Ref "x" 2)
-           )
-          (Val 2) Keep
-        )
-    it "mixing lets and lambdas: \"((x) => let x = 2; ((x) => let x = 0; x)(1)(3)\"" $ do
-      parse' term "((x) => let x = 2; ((x) => let x = 0; x)(1))(3)" `shouldBe`
-        (Just $
-          App
-          (Lam "x" (Hol "#0") Keep $ 
-           Let "x" (Val 2) Norm $
-            (App
-              (Lam "x" (Hol "#1") Keep $
-               Let "x" (Val 0) Norm 
-               (Ref "x" 0)
-              )
-              (Val 1) Keep
-            )
-          )
-          (Val 3) Keep
-         )
-    it "mixing lets and lambdas: \"((x) => let x = 2; ((x) => let x = 0; ^x)(1)(3)\"" $ do
-      parse' term "((x) => let x = 2; ((x) => let x = 0; ^x)(1))(3)" `shouldBe`
-        (Just $
-          App
-          (Lam "x" (Hol "#0") Keep $ 
-           Let "x" (Val 2) Norm $
-            (App
-              (Lam "x" (Hol "#1") Keep $
-               Let "x" (Val 0) Norm 
-               (Var 0)
-              )
-              (Val 1) Keep
-            )
-          )
-          (Val 3) Keep
-         )
+        (Just $ Let [("x",Val 1)]  $ Let [("x",Val 0)]  (Ref "x" 2))
 
-    it "mixing lets and lambdas: \"((x) => let x = 2; ((x) => let x = 0; ^^x)(1))(3)\"" $ do
-      parse' term "((x) => let x = 2; ((x) => let x = 0; ^^x)(1))(3)" `shouldBe`
-        (Just $
-          App
-          (Lam "x" (Hol "#0") Keep $ 
-           Let "x" (Val 2) Norm $
-            (App
-              (Lam "x" (Hol "#1") Keep $
-               Let "x" (Val 0) Norm 
-               (Ref "x" 1)
-              )
-              (Val 1) Keep
-            )
+    describe "mixing lets and lambdas" $ do
+      it "\"let x = 2; let x = 1; ((x) => x)(0)\"" $ do
+        parse' let_ "let x = 2; let x = 1; ((x) => x)(0)\"" `shouldBe`
+          (Just $
+            Let [("x",Val 2)] $ Let [("x",Val 1)] 
+            (App (Lam "x" (Hol "#0") Keep (Var 0)) (Val 0) Keep)
           )
-          (Val 3) Keep
-         )
-    it "mixing lets and lambdas: \"((x) => let x = 2; ((x) => let x = 0; ^^^x)(1))(3)\"" $ do
-      parse' term "((x) => let x = 2; ((x) => let x = 0; ^^^x)(1))(3)" `shouldBe`
-        (Just $
-          App
-          (Lam "x" (Hol "#0") Keep $ 
-           Let "x" (Val 2) Norm $
-            (App
-              (Lam "x" (Hol "#1") Keep $
-               Let "x" (Val 0) Norm 
-               (Var 1)
-              )
-              (Val 1) Keep
-            )
+      it "\"let x = 2; let x = 1; ((x) => ^x)(0)\"" $ do
+        parse' let_ "let x = 2; let x = 1; ((x) => ^x)(0)\"" `shouldBe`
+          (Just $ 
+            Let [("x",Val 2)] $ Let [("x",Val 1)] $
+            (App (Lam "x" (Hol "#0") Keep (Ref "x" 0)) (Val 0) Keep)
           )
-          (Val 3) Keep
-         )
+      it "\"let x = 2; let x = 1; ((x) => ^^x)(0)\"" $ do
+        parse' term "let x = 2; let x = 1; ((x) => ^^x)(0)\"" `shouldBe`
+          (Just $
+            Let [("x",Val 2)] $ Let [("x",Val 1)] $
+            (App (Lam "x" (Hol "#0") Keep (Ref "x" 1)) (Val 0) Keep)
+          )
+      it "\"let x = 2; let x = 1; ((x) => ^^^x)(0)\"" $ do
+        parse' term "let x = 2; let x = 1; ((x) => ^^^x)(0)\"" `shouldBe`
+          (Just $
+            Let [("x",Val 2)] $ Let [("x",Val 1)] $
+            (App (Lam "x" (Hol "#0") Keep (Ref "x" 2)) (Val 0) Keep)
+          )
+      it "\"((x) => let x = 1; let x = 0; x)(2)\"" $ do
+        parse' term "((x) => let x = 1; let x = 0; x)(2)" `shouldBe`
+          (Just $
+            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 1)] $ Let [("x",Val 0)] $
+              (Ref "x" 0))
+            (Val 2) Keep)
+      it "\"((x) => let x = 1; let x = 0; ^x)(2)\"" $ do
+        parse' term "((x) => let x = 1; let x = 0; ^x)(2)" `shouldBe`
+          (Just $
+            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 1)] $ Let [("x",Val 0)] $
+              (Ref "x" 1))
+            (Val 2) Keep
+          )
+      it "\"((x) => let x = 1; let x = 0; ^^x)(2)\"" $ do
+        parse' term "((x) => let x = 1; let x = 0; ^^x)(2)" `shouldBe`
+          (Just $
+            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 1)] $ Let [("x",Val 0)] $
+              (Var 0))
+            (Val 2) Keep
+          )
+      it "\"((x) => let x = 1; let x = 0; ^^^x)(2)\"" $ do
+        parse' term "((x) => let x = 1; let x = 0; ^^^x)(2)" `shouldBe`
+          (Just $
+            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 1)] $ Let [("x",Val 0)] $
+              (Ref "x" 2))
+            (Val 2) Keep)
+      it "\"((x) => let x = 2; ((x) => let x = 0; x)(1)(3)\"" $ do
+        parse' term "((x) => let x = 2; ((x) => let x = 0; x)(1))(3)" `shouldBe`
+          (Just $
+            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 2)] $
+              (App (Lam "x" (Hol "#1") Keep $ Let [("x",Val 0)]  (Ref "x" 0))
+                (Val 1) Keep))
+            (Val 3) Keep)
+      it "\"((x) => let x = 2; ((x) => let x = 0; ^x)(1)(3)\"" $ do
+        parse' term "((x) => let x = 2; ((x) => let x = 0; ^x)(1))(3)" `shouldBe`
+          (Just $
+            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 2)] $
+                  (App (Lam "x" (Hol "#1") Keep $ Let [("x",Val 0)]  (Var 0))
+                    (Val 1) Keep))
+                (Val 3) Keep)
 
+      it "\"((x) => let x = 2; ((x) => let x = 0; ^^x)(1))(3)\"" $ do
+        parse' term "((x) => let x = 2; ((x) => let x = 0; ^^x)(1))(3)" `shouldBe`
+          (Just $
+            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 2)] $
+                  (App (Lam "x" (Hol "#1") Keep $ Let [("x",Val 0)]  (Ref "x" 1))
+                    (Val 1) Keep))
+            (Val 3) Keep)
+      it "\"((x) => let x = 2; ((x) => let x = 0; ^^^x)(1))(3)\"" $ do
+        parse' term "((x) => let x = 2; ((x) => let x = 0; ^^^x)(1))(3)" `shouldBe`
+          (Just $
+            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 2)] $
+              (App (Lam "x" (Hol "#1") Keep $ Let [("x",Val 0)] (Var 1))
+                (Val 1) Keep))
+            (Val 3) Keep)
 
+    describe "let block" $ do
+      it "\"let (x = 1; y = 2); y\"" $ do
+        parse' term "let (x = 1; y = 2); y" `shouldBe`
+          (Just $ (Let [("x",Val 1),("y",Val 2)] (Ref "y" 0)))
+      it "\"let (x = 1, y = 2); y\"" $ do
+        parse' term "let (x = 1, y = 2); y" `shouldBe`
+          (Just $ (Let [("x",Val 1),("y",Val 2)] (Ref "y" 0)))
+      it "\"let (x = 1 y = 2) y\"" $ do
+        parse' term "let (x = 1 y = 2); y" `shouldBe`
+          (Just $ (Let [("x",Val 1),("y",Val 2)] (Ref "y" 0)))
