@@ -4,62 +4,94 @@ import           Prelude                    hiding (log)
 
 import           Data.Char
 import           Data.List                  hiding (group)
+import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as M
-import           Data.Maybe                 (isJust,fromJust)
+import           Data.Maybe                 (fromJust, isJust)
+import           Data.Set                   (Set)
+import qualified Data.Set                   as Set
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import           Data.Void
 
 import           Control.Monad              (void)
 import           Control.Monad.Identity
-import           Control.Monad.RWS.Lazy    hiding (All)
+import           Control.Monad.RWS.Lazy     hiding (All)
 
 import           Text.Megaparsec            hiding (State)
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Text.Megaparsec.Debug
 
-import           Check hiding (newHole, _context, binder, Binder)
-import           Core
+import           Core                       (Eras (..), Name, Op (..))
+import qualified Core                       as Core
 import           Pretty
+
+
+-- Lang.Term, this includes syntax sugars like `Let`
+data Term
+  = Var Int                    -- Variable
+  | Typ                        -- Type type
+  | All Name Term Eras Term    -- Forall
+  | Lam Name Term Eras Term    -- Lambda
+  | App Term Term Eras         -- Application
+  | Slf Name Term              -- Self-type
+  | New Term Term              -- Self-type introduction
+  | Use Term                   -- Self-type elimination
+  | Let [(Name,Term)] Term     -- Recursive locally scoped definition
+  | Num                        -- Number type
+  | Val Int                    -- Number Value
+  | Opr Op Term Term           -- Binary operation
+  | Ite Term Term Term         -- If-then-else
+  | Ann Term Term              -- Type annotation
+  | Log Term Term              -- inline log
+  | Hol Name                   -- type hole or metavariable
+  | Ref Name Int               -- reference to a definition
+  deriving (Eq, Show, Ord)
 
 -- binders can bind variables (deBruijn) or references
 data Binder = VarB Name | RefB Name deriving (Eq, Show)
 
--- track Holes (meta-variables) for unique names
-data ParseState = ParseState { _holeCount :: Int } deriving Show
+data ParseState = ParseState
+  { _holeCount    :: Int     -- for generating unique metavariable names
+  } deriving Show
 
--- track binding contexts from lets, lambdas or foralls
-data ParseEnv = ParseEnv { _context :: [Binder] } deriving Show
+data ParseEnv = ParseEnv
+  { _binders :: [Binder] -- binding contexts from lets, lambdas or foralls
+  , _block   :: Set Name -- to error on duplicate definitions in same block
+  } deriving Show
 
 -- add a list of binders to the context
 binders :: [Binder] -> Parser a -> Parser a
-binders bs p = local (\e -> e { _context = (reverse bs) ++ _context e }) p
+binders bs p = local (\e -> e { _binders = (reverse bs) ++ _binders e }) p
 
--- a parser is a Reader-Writer-State monad transformer wrapped over
--- a ParsecT over Text
+-- add a name to current mutual recursion block
+block :: Name -> Parser a -> Parser a
+block n p = local (\e -> e { _block = Set.insert n (_block e)}) p
+
+-- a parser is a Reader-Writer-State monad transformer wrapped over a ParsecT
 -- TODO : Custom error messages
 type Parser = RWST ParseEnv () ParseState (ParsecT Void Text Identity)
 
+initParseState = ParseState 0
+initParseEnv   = ParseEnv [] Set.empty
+
 -- top level parser with default env and state
-parseDefault :: Show a 
-             => Parser a 
+parseDefault :: Show a
+             => Parser a
              -> Text
              -> Identity (Either (ParseErrorBundle Text Void) (a, ParseState, ()))
-parseDefault p s = runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
+parseDefault p s = runParserT (runRWST p initParseEnv initParseState) "" s
 
 -- a useful testing function
 parserTest :: Show a => Parser a -> Text -> IO ()
-parserTest p s = print $
-  runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
+parserTest p s = print $ parseDefault p s
 
 -- evals the term directly
-evalTest :: Parser Term -> Text -> IO ()
-evalTest p s = do
-  let Identity (Right (a,st,w)) =
-        runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
-  print $ a
-  print $ eval a M.empty
+--evalTest :: Parser Term -> Text -> IO ()
+--evalTest p s = do
+--  let Identity (Right (a,st,w)) = parseDefault p s
+--  print $ a
+--  print $ eval a Core.emptyModule
 
 -- space consumer
 sc :: Parser ()
@@ -89,7 +121,7 @@ name = do
 -- resolves if a name is a variable or reference
 refVar :: Parser Term
 refVar = do
-  ctx <- asks _context
+  ctx <- asks _binders
   is <- optional (some (lit "^"))
   n <- name
   let carets = (maybe 0 id (length <$> is))
@@ -273,10 +305,10 @@ opr x = do
   case op of
     "::" -> return $ Ann y x
     "->" -> return $ All "_" x Keep y
-    "+"  -> return $ Op2 ADD x y
-    "-"  -> return $ Op2 SUB x y
-    "*"  -> return $ Op2 MUL x y
-    "==" -> return $ Op2 EQL x y
+    "+"  -> return $ Opr ADD x y
+    "-"  -> return $ Opr SUB x y
+    "*"  -> return $ Opr MUL x y
+    "==" -> return $ Opr EQL x y
     f    -> return $ App (App (Ref f 0) x Keep) y Keep
 
 -- an expression with lambda-style applications
@@ -286,9 +318,11 @@ expr = do
   return $ foldl1 (\x y -> App x y Keep) ts
 
 -- a definition
-def :: Parser (Name, Term)
-def = do 
+def :: Parser (Name,Term)
+def = do
   n  <- name
+  ls <- asks _block
+  when (Set.member n ls) (fail "attempted to redefine a name")
   bs <- (optional $ binds)
   sc
   let ns = maybe [] (fmap (\(a,b,c) -> VarB a)) bs
@@ -307,24 +341,36 @@ def = do
 let_ :: Parser Term
 let_ = do
   sym "let"
-  ds <- lets <|> (pure <$> letDef)
-  t <- binders ((RefB . fst) <$> ds) $ expr
+  ds <- (sym "(" >> lets) <|> (pure <$> (def <* sepr))
+  t <- binders ((\(a, b) -> RefB a) <$> ds) $ expr
   return $ Let ds t
   where
-    letDef :: Parser (Name,Term)
-    letDef = def <* sepr
-
     lets :: Parser [(Name, Term)]
-    lets = sym "(" >> some letDef <* (lit ")" >> sepr)
+    lets = (lit ")" >> sepr >> return []) <|> next
+
+    next :: Parser [(Name, Term)]
+    next = do
+     ls    <- asks _block
+     (n,t) <- def <* sepr
+     when (Set.member n ls) (fail "attempted to redefine a name")
+     ns <- block n $ lets
+     return $ (n,t) : ns
+
 
     sepr :: Parser (Maybe Text)
     sepr = sc >> optional (sym ";" <|> sym ",")
 
-file :: Parser (M.Map Name Term)
-file = do; sc; ds <- (sepEndBy1 def' sc); eof; return $ M.fromList ds
+module_ :: Parser (M.Map Name Term)
+module_ = sc >> M.fromList <$> defs
   where
-    def' :: Parser (Name, Term)
-    def' = do
-      (n,d) <- def
-      return $ (n,d)
+    defs :: Parser [(Name, Term)]
+    defs = (sc >> eof >> return []) <|> next
+
+    next :: Parser [(Name, Term)]
+    next = do
+     ls    <- asks _block
+     (n,t) <- def <* sc
+     when (Set.member n ls) (fail "attempted to redefine a name")
+     ns <- block n $ defs
+     return $ (n,t) : ns
 

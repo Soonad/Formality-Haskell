@@ -15,6 +15,7 @@ library
   exposed-modules:   Runtime.Net
                      Core
                      Lang
+                     CoreSyn
                      Check
                      Pretty
                      Unify
@@ -32,27 +33,27 @@ library
     , equivalence
   default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
 
-executable fide
-  main-is: Main.hs
-  build-depends:
-    base
-    , containers
-    , transformers
-    , megaparsec
-    , mtl
-    , text
-    , vector
-    , process
-    , repline
-    , haskeline
-  other-modules: Core
-                 Lang
-                 Fide
-                 Check
-                 Pretty
-                 HaskelineT
-  default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
-  hs-source-dirs: fide src
+--executable fide
+--  main-is: Main.hs
+--  build-depends:
+--    base
+--    , containers
+--    , transformers
+--    , megaparsec
+--    , mtl
+--    , text
+--    , vector
+--    , process
+--    , repline
+--    , haskeline
+--  other-modules: Core
+--                 Lang
+--                 Fide
+--                 Check
+--                 Pretty
+--                 HaskelineT
+--  default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
+--  hs-source-dirs: fide src
 
 test-suite test
   type: exitcode-stdio-1.0
@@ -76,6 +77,7 @@ test-suite test
                 , Spec.Net
                 , Spec.Core
                 , Core
+                , CoreSyn
                 , Lang
                 , Check
                 , Pretty

@@ -17,9 +17,9 @@ import           Control.Monad.State
 import           Core
 
 data CheckEnv = CheckEnv
-  { _defs     :: Defs
-  , _context  :: [Binder]
-  , _erased   :: Eras
+  { _module          :: Module
+  , _context         :: [Binder]
+  , _erased          :: Eras
   } deriving (Show, Eq, Ord)
 
 data Binder = Binder
@@ -27,10 +27,6 @@ data Binder = Binder
   , _type :: Term
   , _eras :: Eras
   } deriving (Show, Eq, Ord)
-
---instance Show Binder where
---  show (Binder n t Eras) = concat [T.unpack n, ":", show t, ";"]
---  show (Binder n t e) = concat [T.unpack n, ":", show t]
 
 data CheckLog = CheckLog
   { _logs        :: [(Term, Term, [Binder])]
@@ -47,20 +43,17 @@ instance Monoid CheckLog where
 type Constraint = (CheckEnv, Term, Term)
 
 data CheckState = CheckState
-  { _holCount  :: Int
-  , _refTypes  :: M.Map Name Term
-  --, _eholCount :: Int
+  { _holCount      :: Int
+  , _refTypes      :: M.Map Name Term
   } deriving Show
 
 data CheckError
   = ErasedInKeptPosition Name
   | UnboundVariable Int CheckEnv
-  | NotInScope Term
   | ErasureMismatch Term
-  | UndefinedReference Name
   deriving Show
 
-type Check = ExceptT CheckError (RWS CheckEnv CheckLog CheckState)
+type Check a = ExceptT CheckError (RWS CheckEnv CheckLog CheckState) a
 
 binder :: (Name,Term,Eras) -> Check a -> Check a
 binder (n,h,e) = local (extend (Binder n h e))
@@ -85,12 +78,6 @@ newHole= do
   c <- gets _holCount
   modify (\s -> s {_holCount = c + 1})
   return $ Hol (T.pack $ "#c" ++ show c)
-
---newEHol :: Check Eras
---newEHol= do
---  c <- gets _eholCount
---  modify (\s -> s {_eholCount = c + 1})
---  return $ EHol (T.pack $ "#e" ++ show c)
 
 extend :: Binder -> CheckEnv -> CheckEnv
 extend c env = env { _context = c : (_context env) }
@@ -140,11 +127,18 @@ check term = case term of
     h  <- newHole
     xT <- expect (Slf "_" h) x
     return (subst h x 0)
---  Let n t r b -> do
---    tT <- check t
---    ds <- asks _defs
---    rs <- gets _refTypes
---    local (\env -> env {_defs = extendDefs n t r ds}) $ check b
+  --Let bs t -> do
+    --let names = M.keys bs
+    --let terms = M.elems bs
+    --let check' term = (flip local) (check term)
+    --     (\env -> env
+    --       { _defs = extendDefs bs (_defs env)
+    --       , _currentLetBlock = Set.fromList names
+    --       }
+    --     )
+    --types <- traverse check' terms
+
+    return $ Typ
   Num   -> return Typ
   Val _ -> return Num
   Op1 o a b -> expect Num b
@@ -156,29 +150,41 @@ check term = case term of
   -- Logs in Writer monad
   Log m x -> do
     mT  <- check m
-    ds  <- asks _defs
+    mod <- asks _module
     ctx <- asks _context
-    writeLog (m, eval (erase mT) ds, ctx)
+    writeLog (m, eval (erase mT) mod, ctx)
     check x
   Hol n -> return $ Hol (n `T.append` "_type")
   Ref n i -> do
-    ds <- asks _defs
-    rs <- gets _refTypes
-    case (defLookup n i ds, rs M.!? n) of
-      (Just t, Just tT) -> return tT
-      (Just t , Nothing) -> do
-        tT <- check t
-        modify (\s -> s { _refTypes = M.insert n tT rs })
-        return tT
-      (Nothing, _) -> throwError $ UndefinedReference n
+    -- ds <- asks _defs
+    --g  <- M.lookup n <$> gets _globalTypes
+    --let types = (pure <$> b) <> ls <> (pure <$> g)
+    --case (defLookup n i ds, types >>= (\xs -> xs !? i)) of
+    --  (Just t, Just tT) -> return tT
+    --  (Just t , Nothing) -> do
+    --    tT <- check t
+    --    if (n `elem` ns && i == 0) then (do
+    --      modify (\s -> s { _letBlockTypes = M.insert n tT (_letBlockTypes s)})
+    --      return tT
+    --      )
+    --    else (do
+    --      modify (\s -> s { _globalTypes = M.insert n tT (_globalTypes s)})
+    --      return tT
+    --      )
+    return $ Typ
   Ann t x -> expect t x
 
 runCheck :: CheckEnv -> CheckState -> Check a -> (Either CheckError a, CheckState, CheckLog)
-runCheck env cs = (\x -> runRWS x env cs) . runExceptT
+runCheck env ste = (\x -> runRWS x env ste) . runExceptT
 
 checkTerm :: Term -> (Either CheckError Term, CheckState, CheckLog)
-checkTerm = (runCheck (CheckEnv M.empty [] Keep) (CheckState 0 M.empty)) . check
+checkTerm =
+  let env = CheckEnv emptyModule [] Keep
+      ste = CheckState 0 M.empty
+    in (runCheck env ste) . check
 
-checkTermWithDefs :: Defs -> Term -> (Either CheckError Term, CheckState, CheckLog)
-checkTermWithDefs defs = (runCheck (CheckEnv defs [] Keep) (CheckState 0 M.empty)) . check
-
+checkModule :: Module -> Term -> (Either CheckError Term, CheckState, CheckLog)
+checkModule mod =
+  let env = CheckEnv mod [] Keep
+      ste = CheckState 0 M.empty
+    in (runCheck env ste) . check

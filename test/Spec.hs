@@ -12,4 +12,4 @@ main :: IO ()
 main = hspec $ do
   describe "Net"  $ Net.spec
   describe "Lang" $ Lang.spec
-  describe "Core" $ Core.spec
+--  describe "Core" $ Core.spec

@@ -1,6 +1,8 @@
 module Core where
 
+import           Data.Map.Strict        (Map)
 import qualified Data.Map.Strict        as M
+import           Data.Set               (Set)
 import qualified Data.Set               as Set
 import           Data.Text              (Text)
 import qualified Data.Text              as T
@@ -16,8 +18,7 @@ data Eras = Eras  -- Erase from runtime
           | Keep  -- Keep at runtime
           deriving (Show, Eq, Ord)
 
-type Bind = [(Name, Term)]
-
+-- Core.Term
 data Term
   = Var Int                    -- Variable
   | Typ                        -- Type type
@@ -27,7 +28,6 @@ data Term
   | Slf Name Term              -- Self-type
   | New Term Term              -- Self-type introduction
   | Use Term                   -- Self-type elimination
-  | Let Bind Term              -- Recursive locally scoped definition
   | Num                        -- Number type
   | Val Int                    -- Number Value
   | Op1 Op Int Term            -- Unary operation (curried)
@@ -38,6 +38,14 @@ data Term
   | Hol Name                   -- type hole or metavariable
   | Ref Name Int               -- reference to a definition
   deriving (Eq, Show, Ord)
+
+data Module = Module
+  { _terms :: M.Map Int Term
+  , _names :: M.Map Name Int
+  } deriving (Eq, Show, Ord)
+
+emptyModule :: Module
+emptyModule = Module M.empty M.empty
 
 data Op = ADD | SUB | MUL | DIV | MOD | EQL
 -- | POW | AND | BOR | XOR | NOT | SHR | SHL | GTH | LTH | EQL
@@ -54,7 +62,7 @@ shift term inc dep = let go x = shift x inc dep in case term of
   Slf n t      -> Slf n (shift t inc (dep + 1))
   New t x      -> New (go t) (go x)
   Use x        -> Use (go x)
-  Let bs t     -> Let ((fmap go) <$> bs) (go t)
+  -- Let bs t     -> Let (go <$> bs) (go t)
   Num          -> Num
   Val n        -> Val n
   Op1 o a b    -> Op1 o a (go b)
@@ -80,7 +88,7 @@ subst term v dep =
   Slf n t     -> Slf n (subst t v' (dep + 1))
   New t x     -> New (go t) (go x)
   Use x       -> Use (go x)
-  Let bs t    -> Let ((fmap go) <$> bs) (go t)
+  -- Let bs t    -> Let (go <$> bs) (go t)
   Num         -> Num
   Val n       -> Val n
   Op1 o a b   -> Op1 o a (go b)
@@ -98,49 +106,37 @@ substMany t vals d = go t vals d 0
     go t (v:vs) d i = go (subst t (shift v (l - i) 0) (d + l - i)) vs d (i + 1)
     go t [] d i = t
 
-type Defs = M.Map Name [Term]
-
-defLookup :: Name -> Int -> Defs -> Maybe Term
-defLookup n i defs = case M.lookup n defs of
-  Just xs -> if i >= 0 && i < length xs then Just $ xs !! i else Nothing
-  Nothing -> Nothing
-
-dereference :: Name -> Int -> Defs -> Term
-dereference n i defs = maybe (Ref n i) id (defLookup n i defs)
-
-extendDefs :: [(Name,Term)]-> Defs -> Defs
-extendDefs ((n,t):ds) defs = extendDefs ds (M.insertWith ((++)) n [t] defs)
-extendDefs []         defs = defs
+dereference :: Name -> Int -> Module -> Term
+dereference n i defs = maybe (Ref n i) id (M.lookup i (_terms defs))
 
 -- deBruijn
-eval :: Term -> Defs -> Term
-eval term defs = go term defs
+eval :: Term -> Module -> Term
+eval term mod = go term
   where
-  go :: Term -> Defs -> Term
-  go t defs = case t of
+  go :: Term -> Module -> Term
+  go t mod = case t of
     All n h e b -> All n h e b
-    Lam n h e b -> Lam n h e (go b defs)
-    App f a e   -> case (go f defs) of
-      Lam n h e b  -> go (subst b a 0) defs
-      f            -> App f (go a defs) e
-    New t x      -> go x defs
-    Use x        -> go x defs
-    Let bs t     -> go t (extendDefs bs defs)
-    Op1 o a b    -> case go b defs of
+    Lam n h e b -> Lam n h e (go b)
+    App f a e   -> case (go f) of
+      Lam n h e b  -> go (subst b a 0) 
+      f            -> App f (go a) e
+    New t x      -> go x 
+    Use x        -> go x 
+    Op1 o a b    -> case go b  of
       Val n -> Val $ op o a n
       x     -> Op1 o a x
-    Op2 o a b   -> case go a defs of
-      Val n -> go (Op1 o n b) defs
+    Op2 o a b   -> case go a  of
+      Val n -> go (Op1 o n b) 
       x     -> Op2 o x b
-    Ite c t f   -> case go c defs of
-      Val n -> if n > 0 then go t defs else go f defs
+    Ite c t f   -> case go c  of
+      Val n -> if n > 0 then go t  else go f 
       x     -> Ite x t f
-    Ann t x     -> go x defs
-    Log m x     -> Log (go m defs) (go x defs)
-    Ref n i      -> case (dereference n i defs) of
+    Ann t x     -> go x 
+    Log m x     -> Log (go m) (go x)
+    Ref n i      -> case (dereference n i mod) of
       Ref n' i'  -> if n' == n && i == i' then Ref n i
-                    else go (dereference n' i' defs) defs
-      x          -> go x defs
+                    else go (dereference n' i' mod)
+      x          -> go x
     _           -> t
 
 op :: Op -> Int -> Int -> Int
@@ -166,7 +162,7 @@ erase term = case term of
   Slf n t        -> Slf n (erase t)
   New t x        -> erase x
   Use x          -> erase x
-  Let bs t       -> Let ((fmap erase) <$> bs) (erase t)
+  -- Let bs t       -> Let (erase <$> bs) (erase t)
   Ann t x        -> erase x
   Log m x        -> Log (erase m) (erase x)
   _              -> term

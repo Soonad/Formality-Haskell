@@ -15,13 +15,12 @@ import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Control.Monad.RWS.Lazy    hiding (All)
 
-import Core
+import           Core                       (Eras (..), Name, Op (..))
 import Lang
 
-parse' :: Parser a -> Text -> Maybe a
+parse' :: Show a => Parser a -> Text -> Maybe a
 parse' p s =
-  let res = runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s in
-  case res of
+  case parseDefault p s of
     Identity (Left e)       -> Nothing
     Identity (Right (a, st, w)) -> Just a
 
