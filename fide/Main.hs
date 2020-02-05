@@ -10,11 +10,7 @@ import qualified System.Console.Haskeline   as H
 import           System.Process             (callCommand)
 
 import           Fide
-import           Lang
-
-import           Text.Megaparsec            hiding (State)
-import           Text.Megaparsec.Char
-import qualified Text.Megaparsec.Char.Lexer as L
+import Core (ID(..), Module, emptyModule)
 
 main :: IO ()
-main = evalStateT fide (FideST M.empty)
+main = evalStateT fide (FideState emptyModule (ID 0))

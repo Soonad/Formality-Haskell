@@ -72,5 +72,3 @@ abort :: MonadIO m => HaskelineT m a
 abort = throwIO H.Interrupt
 
 
-
-

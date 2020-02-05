@@ -44,13 +44,14 @@ type Constraint = (CheckEnv, Term, Term)
 
 data CheckState = CheckState
   { _holCount      :: Int
-  , _refTypes      :: M.Map Name Term
+  , _refTypes      :: M.Map ID Term
   } deriving Show
 
 data CheckError
   = ErasedInKeptPosition Name
-  | UnboundVariable Int CheckEnv
   | ErasureMismatch Term
+  | UnboundVariable Int CheckEnv
+  | UndefinedRefInModule Name ID Module
   deriving Show
 
 type Check a = ExceptT CheckError (RWS CheckEnv CheckLog CheckState) a
@@ -127,18 +128,6 @@ check term = case term of
     h  <- newHole
     xT <- expect (Slf "_" h) x
     return (subst h x 0)
-  --Let bs t -> do
-    --let names = M.keys bs
-    --let terms = M.elems bs
-    --let check' term = (flip local) (check term)
-    --     (\env -> env
-    --       { _defs = extendDefs bs (_defs env)
-    --       , _currentLetBlock = Set.fromList names
-    --       }
-    --     )
-    --types <- traverse check' terms
-
-    return $ Typ
   Num   -> return Typ
   Val _ -> return Num
   Op1 o a b -> expect Num b
@@ -156,25 +145,23 @@ check term = case term of
     check x
   Hol n -> return $ Hol (n `T.append` "_type")
   Ref n i -> do
-    -- ds <- asks _defs
-    --g  <- M.lookup n <$> gets _globalTypes
-    --let types = (pure <$> b) <> ls <> (pure <$> g)
-    --case (defLookup n i ds, types >>= (\xs -> xs !? i)) of
-    --  (Just t, Just tT) -> return tT
-    --  (Just t , Nothing) -> do
-    --    tT <- check t
-    --    if (n `elem` ns && i == 0) then (do
-    --      modify (\s -> s { _letBlockTypes = M.insert n tT (_letBlockTypes s)})
-    --      return tT
-    --      )
-    --    else (do
-    --      modify (\s -> s { _globalTypes = M.insert n tT (_globalTypes s)})
-    --      return tT
-    --      )
-    return $ Typ
+    ds <- asks (_terms . _module)
+    rs <- gets _refTypes
+    case (M.lookup i ds, M.lookup i rs) of
+      (Just t, Just tT)  -> return tT
+      (Just t , Nothing) -> do
+        tT <- check t
+        modify (\s -> s { _refTypes = M.insert i tT (_refTypes s)})
+        return tT
+      _                  -> do
+        m <- asks _module
+        throwError $ UndefinedRefInModule n i m
   Ann t x -> expect t x
 
-runCheck :: CheckEnv -> CheckState -> Check a -> (Either CheckError a, CheckState, CheckLog)
+runCheck :: CheckEnv
+         -> CheckState
+         -> Check a
+         -> (Either CheckError a, CheckState, CheckLog)
 runCheck env ste = (\x -> runRWS x env ste) . runExceptT
 
 checkTerm :: Term -> (Either CheckError Term, CheckState, CheckLog)

@@ -71,7 +71,6 @@ shift term inc dep = let go x = shift x inc dep in case term of
   Slf n t      -> Slf n (shift t inc (dep + 1))
   New t x      -> New (go t) (go x)
   Use x        -> Use (go x)
-  -- Let bs t     -> Let (go <$> bs) (go t)
   Num          -> Num
   Val n        -> Val n
   Op1 o a b    -> Op1 o a (go b)
@@ -97,7 +96,6 @@ subst term v dep =
   Slf n t     -> Slf n (subst t v' (dep + 1))
   New t x     -> New (go t) (go x)
   Use x       -> Use (go x)
-  -- Let bs t    -> Let (go <$> bs) (go t)
   Num         -> Num
   Val n       -> Val n
   Op1 o a b   -> Op1 o a (go b)
