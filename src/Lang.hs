@@ -26,7 +26,6 @@ import           Core                       (Eras (..), Name, Op (..))
 import qualified Core                       as Core
 import           Pretty
 
-
 -- Lang.Term, this includes syntax sugars like `Let`
 data Term
   = Var Int                    -- Variable
@@ -37,7 +36,7 @@ data Term
   | Slf Name Term              -- Self-type
   | New Term Term              -- Self-type introduction
   | Use Term                   -- Self-type elimination
-  | Let [(Name,Term)] Term     -- Recursive locally scoped definition
+  | Let (Map Name Term) Term   -- Recursive locally scoped definition
   | Num                        -- Number type
   | Val Int                    -- Number Value
   | Opr Op Term Term           -- Binary operation
@@ -79,8 +78,9 @@ initParseEnv   = ParseEnv [] Set.empty
 parseDefault :: Show a
              => Parser a
              -> Text
-             -> Identity (Either (ParseErrorBundle Text Void) (a, ParseState, ()))
-parseDefault p s = runParserT (runRWST p initParseEnv initParseState) "" s
+             -> Either (ParseErrorBundle Text Void) (a, ParseState, ())
+parseDefault p s =
+  runIdentity $ runParserT (runRWST p initParseEnv initParseState) "" s
 
 -- a useful testing function
 parserTest :: Show a => Parser a -> Text -> IO ()
@@ -343,7 +343,7 @@ let_ = do
   sym "let"
   ds <- (sym "(" >> lets) <|> (pure <$> (def <* sepr))
   t <- binders ((\(a, b) -> RefB a) <$> ds) $ expr
-  return $ Let ds t
+  return $ Let (M.fromList ds) t
   where
     lets :: Parser [(Name, Term)]
     lets = (lit ")" >> sepr >> return []) <|> next
@@ -364,13 +364,16 @@ module_ :: Parser (M.Map Name Term)
 module_ = sc >> M.fromList <$> defs
   where
     defs :: Parser [(Name, Term)]
-    defs = (sc >> eof >> return []) <|> next
+    defs = (sepr >> eof >> return []) <|> next
 
     next :: Parser [(Name, Term)]
     next = do
      ls    <- asks _block
-     (n,t) <- def <* sc
+     (n,t) <- def <* sepr
      when (Set.member n ls) (fail "attempted to redefine a name")
      ns <- block n $ defs
      return $ (n,t) : ns
+
+    sepr :: Parser (Maybe Text)
+    sepr = sc >> optional (sym ";" <|> sym ",")
 

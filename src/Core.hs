@@ -18,6 +18,15 @@ data Eras = Eras  -- Erase from runtime
           | Keep  -- Keep at runtime
           deriving (Show, Eq, Ord)
 
+newtype ID = ID { unID :: Int } deriving (Eq, Ord)
+
+instance Enum ID where
+  toEnum = ID
+  fromEnum = unID
+
+instance Show ID where
+  show (ID n) = "#" ++ show n
+
 -- Core.Term
 data Term
   = Var Int                    -- Variable
@@ -36,12 +45,12 @@ data Term
   | Ann Term Term              -- Type annotation
   | Log Term Term              -- inline log
   | Hol Name                   -- type hole or metavariable
-  | Ref Name Int               -- reference to a definition
+  | Ref Name ID               -- reference to a definition
   deriving (Eq, Show, Ord)
 
 data Module = Module
-  { _terms :: M.Map Int Term
-  , _names :: M.Map Name Int
+  { _terms :: M.Map ID Term   -- Either top-level or local definitions
+  , _names :: M.Map Name ID   -- Top-level definitions (must be closed terms)
   } deriving (Eq, Show, Ord)
 
 emptyModule :: Module
@@ -106,19 +115,19 @@ substMany t vals d = go t vals d 0
     go t (v:vs) d i = go (subst t (shift v (l - i) 0) (d + l - i)) vs d (i + 1)
     go t [] d i = t
 
-dereference :: Name -> Int -> Module -> Term
+dereference :: Name -> ID -> Module -> Term
 dereference n i defs = maybe (Ref n i) id (M.lookup i (_terms defs))
 
 -- deBruijn
 eval :: Term -> Module -> Term
 eval term mod = go term
   where
-  go :: Term -> Module -> Term
-  go t mod = case t of
+  go :: Term -> Term
+  go t = case t of
     All n h e b -> All n h e b
     Lam n h e b -> Lam n h e (go b)
     App f a e   -> case (go f) of
-      Lam n h e b  -> go (subst b a 0) 
+      Lam n h e b  -> go (subst b a 0)
       f            -> App f (go a) e
     New t x      -> go x 
     Use x        -> go x 
@@ -126,10 +135,10 @@ eval term mod = go term
       Val n -> Val $ op o a n
       x     -> Op1 o a x
     Op2 o a b   -> case go a  of
-      Val n -> go (Op1 o n b) 
+      Val n -> go (Op1 o n b)
       x     -> Op2 o x b
     Ite c t f   -> case go c  of
-      Val n -> if n > 0 then go t  else go f 
+      Val n -> if n > 0 then go t  else go f
       x     -> Ite x t f
     Ann t x     -> go x 
     Log m x     -> Log (go m) (go x)

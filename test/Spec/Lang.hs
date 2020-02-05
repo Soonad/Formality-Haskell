@@ -9,20 +9,19 @@ import           Control.Monad.State.Strict
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import           Data.Void
+import           Data.Map.Strict            (Map)
+import qualified Data.Map.Strict            as M
 
 import           Text.Megaparsec            hiding (State)
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Control.Monad.RWS.Lazy    hiding (All)
 
-import           Core                       (Eras (..), Name, Op (..))
-import Lang
+import           Core (Eras (..), Name, Op (..))
+import           Lang
 
 parse' :: Show a => Parser a -> Text -> Maybe a
-parse' p s =
-  case parseDefault p s of
-    Identity (Left e)       -> Nothing
-    Identity (Right (a, st, w)) -> Just a
+parse' p s = either (const Nothing) (\(a, st, w) -> Just a) (parseDefault p s)
 
 spec :: SpecWith ()
 spec = do
@@ -134,110 +133,110 @@ spec = do
   describe "Let" $ do
     it "simple let" $ do
       parse' let_ "let x = 1; 2" `shouldBe`
-        (Just $ Let [("x",Val 1)]  (Val 2))
+        (Just $ Let (M.fromList [("x",Val 1)])  (Val 2))
     it "bare reference: \"x\"" $ do
       parse' term "x" `shouldBe` (Just (Ref "x" 0))
     it "referencing a Let: \"let x = 0; x\"" $ do
       parse' let_ "let x = 0; x" `shouldBe` 
-        (Just $ Let [("x",Val 0)]  (Ref "x" 0))
+        (Just $ Let (M.fromList [("x",Val 0)])  (Ref "x" 0))
     it "name-shadowing with let: \"let x = 1; let x = 0; x\"" $ do
       parse' let_ "let x = 1; let x = 0; x" `shouldBe`
-        (Just $ Let [("x",Val 1)]  (Let [("x",Val 0)]  (Ref "x" 0)))
+        (Just $ Let (M.fromList [("x",Val 1)])  (Let (M.fromList [("x",Val 0)])  (Ref "x" 0)))
     it "unshadowing: \"let x = 1; let x = 0; ^x\"" $ do
       parse' let_ "let x = 1; let x = 0; ^x" `shouldBe`
-        (Just $ Let [("x",Val 1)]  (Let [("x",Val 0)]  (Ref "x" 1)))
+        (Just $ Let (M.fromList [("x",Val 1)]) (Let (M.fromList [("x",Val 0)])  (Ref "x" 1)))
     it "referencing out of local scope: \"let x = 1; let x = 0; ^^x\"" $ do
       parse' let_ "let x = 1; let x = 0; ^^x" `shouldBe`
-        (Just $ Let [("x",Val 1)]  $ Let [("x",Val 0)]  (Ref "x" 2))
+        (Just $ Let (M.fromList [("x",Val 1)])  $ Let (M.fromList [("x",Val 0)])  (Ref "x" 2))
 
     describe "mixing lets and lambdas" $ do
       it "\"let x = 2; let x = 1; ((x) => x)(0)\"" $ do
         parse' let_ "let x = 2; let x = 1; ((x) => x)(0)\"" `shouldBe`
           (Just $
-            Let [("x",Val 2)] $ Let [("x",Val 1)] 
+            Let (M.fromList [("x",Val 2)]) $ Let (M.fromList [("x",Val 1)])
             (App (Lam "x" (Hol "#0") Keep (Var 0)) (Val 0) Keep)
           )
       it "\"let x = 2; let x = 1; ((x) => ^x)(0)\"" $ do
         parse' let_ "let x = 2; let x = 1; ((x) => ^x)(0)\"" `shouldBe`
           (Just $ 
-            Let [("x",Val 2)] $ Let [("x",Val 1)] $
+            Let (M.fromList [("x",Val 2)]) $ Let (M.fromList [("x",Val 1)]) $
             (App (Lam "x" (Hol "#0") Keep (Ref "x" 0)) (Val 0) Keep)
           )
       it "\"let x = 2; let x = 1; ((x) => ^^x)(0)\"" $ do
         parse' term "let x = 2; let x = 1; ((x) => ^^x)(0)\"" `shouldBe`
           (Just $
-            Let [("x",Val 2)] $ Let [("x",Val 1)] $
+            Let (M.fromList [("x",Val 2)]) $ Let (M.fromList [("x",Val 1)]) $
             (App (Lam "x" (Hol "#0") Keep (Ref "x" 1)) (Val 0) Keep)
           )
       it "\"let x = 2; let x = 1; ((x) => ^^^x)(0)\"" $ do
         parse' term "let x = 2; let x = 1; ((x) => ^^^x)(0)\"" `shouldBe`
           (Just $
-            Let [("x",Val 2)] $ Let [("x",Val 1)] $
+            Let (M.fromList [("x",Val 2)]) $ Let (M.fromList [("x",Val 1)]) $
             (App (Lam "x" (Hol "#0") Keep (Ref "x" 2)) (Val 0) Keep)
           )
       it "\"((x) => let x = 1; let x = 0; x)(2)\"" $ do
         parse' term "((x) => let x = 1; let x = 0; x)(2)" `shouldBe`
           (Just $
-            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 1)] $ Let [("x",Val 0)] $
+            App (Lam "x" (Hol "#0") Keep $ Let (M.fromList [("x",Val 1)]) $ Let (M.fromList [("x",Val 0)]) $
               (Ref "x" 0))
             (Val 2) Keep)
       it "\"((x) => let x = 1; let x = 0; ^x)(2)\"" $ do
         parse' term "((x) => let x = 1; let x = 0; ^x)(2)" `shouldBe`
           (Just $
-            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 1)] $ Let [("x",Val 0)] $
+            App (Lam "x" (Hol "#0") Keep $ Let (M.fromList [("x",Val 1)]) $ Let (M.fromList [("x",Val 0)]) $
               (Ref "x" 1))
             (Val 2) Keep
           )
       it "\"((x) => let x = 1; let x = 0; ^^x)(2)\"" $ do
         parse' term "((x) => let x = 1; let x = 0; ^^x)(2)" `shouldBe`
           (Just $
-            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 1)] $ Let [("x",Val 0)] $
+            App (Lam "x" (Hol "#0") Keep $ Let (M.fromList [("x",Val 1)]) $ Let (M.fromList [("x",Val 0)]) $
               (Var 0))
             (Val 2) Keep
           )
       it "\"((x) => let x = 1; let x = 0; ^^^x)(2)\"" $ do
         parse' term "((x) => let x = 1; let x = 0; ^^^x)(2)" `shouldBe`
           (Just $
-            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 1)] $ Let [("x",Val 0)] $
+            App (Lam "x" (Hol "#0") Keep $ Let (M.fromList [("x",Val 1)]) $ Let (M.fromList [("x",Val 0)]) $
               (Ref "x" 2))
             (Val 2) Keep)
       it "\"((x) => let x = 2; ((x) => let x = 0; x)(1)(3)\"" $ do
         parse' term "((x) => let x = 2; ((x) => let x = 0; x)(1))(3)" `shouldBe`
           (Just $
-            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 2)] $
-              (App (Lam "x" (Hol "#1") Keep $ Let [("x",Val 0)]  (Ref "x" 0))
+            App (Lam "x" (Hol "#0") Keep $ Let (M.fromList [("x",Val 2)]) $
+              (App (Lam "x" (Hol "#1") Keep $ Let (M.fromList [("x",Val 0)])  (Ref "x" 0))
                 (Val 1) Keep))
             (Val 3) Keep)
       it "\"((x) => let x = 2; ((x) => let x = 0; ^x)(1)(3)\"" $ do
         parse' term "((x) => let x = 2; ((x) => let x = 0; ^x)(1))(3)" `shouldBe`
           (Just $
-            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 2)] $
-                  (App (Lam "x" (Hol "#1") Keep $ Let [("x",Val 0)]  (Var 0))
+            App (Lam "x" (Hol "#0") Keep $ Let (M.fromList [("x",Val 2)]) $
+                  (App (Lam "x" (Hol "#1") Keep $ Let (M.fromList [("x",Val 0)])  (Var 0))
                     (Val 1) Keep))
                 (Val 3) Keep)
 
       it "\"((x) => let x = 2; ((x) => let x = 0; ^^x)(1))(3)\"" $ do
         parse' term "((x) => let x = 2; ((x) => let x = 0; ^^x)(1))(3)" `shouldBe`
           (Just $
-            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 2)] $
-                  (App (Lam "x" (Hol "#1") Keep $ Let [("x",Val 0)]  (Ref "x" 1))
+            App (Lam "x" (Hol "#0") Keep $ Let (M.fromList [("x",Val 2)]) $
+                  (App (Lam "x" (Hol "#1") Keep $ Let (M.fromList [("x",Val 0)]) (Ref "x" 1))
                     (Val 1) Keep))
             (Val 3) Keep)
       it "\"((x) => let x = 2; ((x) => let x = 0; ^^^x)(1))(3)\"" $ do
         parse' term "((x) => let x = 2; ((x) => let x = 0; ^^^x)(1))(3)" `shouldBe`
           (Just $
-            App (Lam "x" (Hol "#0") Keep $ Let [("x",Val 2)] $
-              (App (Lam "x" (Hol "#1") Keep $ Let [("x",Val 0)] (Var 1))
+            App (Lam "x" (Hol "#0") Keep $ Let (M.fromList [("x",Val 2)]) $
+              (App (Lam "x" (Hol "#1") Keep $ Let (M.fromList [("x",Val 0)]) (Var 1))
                 (Val 1) Keep))
             (Val 3) Keep)
 
     describe "let block" $ do
       it "\"let (x = 1; y = 2); y\"" $ do
         parse' term "let (x = 1; y = 2); y" `shouldBe`
-          (Just $ (Let [("x",Val 1),("y",Val 2)] (Ref "y" 0)))
+          (Just $ (Let (M.fromList [("x",Val 1),("y",Val 2)]) (Ref "y" 0)))
       it "\"let (x = 1, y = 2); y\"" $ do
         parse' term "let (x = 1, y = 2); y" `shouldBe`
-          (Just $ (Let [("x",Val 1),("y",Val 2)] (Ref "y" 0)))
+          (Just $ (Let (M.fromList [("x",Val 1),("y",Val 2)]) (Ref "y" 0)))
       it "\"let (x = 1 y = 2) y\"" $ do
         parse' term "let (x = 1 y = 2); y" `shouldBe`
-          (Just $ (Let [("x",Val 1),("y",Val 2)] (Ref "y" 0)))
+          (Just $ (Let (M.fromList [("x",Val 1),("y",Val 2)]) (Ref "y" 0)))
