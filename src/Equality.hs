@@ -5,8 +5,6 @@ import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import Data.Char(chr)
 
-import Data.Sequence hiding (reverse)
-import qualified Data.Set as S
 import Data.Equivalence.Monad
 import SimplerCore
 
@@ -101,64 +99,46 @@ decode term' = go term' 0 []
     Val' i     -> Val i
 
 -- Equality algorithm
-data Node a = Leaf | Continue a | Branch a a
+data Node' a = Stop' | Leaf' | Continue' a | Branch' a a
 
-sameNode :: Term' -> Term' -> Maybe (Node (Term', Term'))
-sameNode t@(Mu' _) s                 = sameNode (unroll' t) s
-sameNode t s@(Mu' _)                 = sameNode t (unroll' s)
-sameNode (All' i h b) (All' j h' b') = if i == j then Just $ Branch (h, h') (b, b') else Nothing
-sameNode (Lam' i h b) (Lam' j h' b') = if i == j then Just $ Branch (h, h') (b, b') else Nothing
-sameNode (App' i f a) (App' j f' a') = if i == j then Just $ Branch (f, f') (a, a') else Nothing
-sameNode (Slf' i t) (Slf' j t')      = if i == j then Just $ Continue (t, t') else Nothing
-sameNode (Var' i) (Var' j)           = if i == j then Just Leaf else Nothing
-sameNode (Rec' i) (Rec' j)           = if i == j then Just Leaf else Nothing
-sameNode (Val' i) (Val' j)           = if i == j then Just Leaf else Nothing
-sameNode Any' Any'                   = Just Leaf
-sameNode Typ' Typ'                   = Just Leaf
-sameNode Num' Num'                   = Just Leaf
-sameNode _ _                         = Nothing
+sameNode' :: Term' -> Term' -> Node' (Term', Term')
+sameNode' t@(Mu' _) s                 = sameNode' (unroll' t) s
+sameNode' t s@(Mu' _)                 = sameNode' t (unroll' s)
+sameNode' (All' i h b) (All' j h' b') = if i == j then Branch' (h, h') (b, b') else Stop'
+sameNode' (Lam' i h b) (Lam' j h' b') = if i == j then Branch' (h, h') (b, b') else Stop'
+sameNode' (App' i f a) (App' j f' a') = if i == j then Branch' (f, f') (a, a') else Stop'
+sameNode' (Slf' i t) (Slf' j t')      = if i == j then Continue' (t, t') else Stop'
+sameNode' (Var' i) (Var' j)           = if i == j then Leaf' else Stop'
+sameNode' (Rec' i) (Rec' j)           = if i == j then Leaf' else Stop'
+sameNode' (Val' i) (Val' j)           = if i == j then Leaf' else Stop'
+sameNode' Any' Any'                   = Leaf'
+sameNode' Typ' Typ'                   = Leaf'
+sameNode' Num' Num'                   = Leaf'
+sameNode' _ _                         = Stop'
 
--- The set of all subterms of a sequence of terms
-allSubterms :: Seq Term' -> S.Set Term'
-allSubterms terms = go terms S.empty where
-  go Empty set = set
-  go (t :<| ts) set = if S.size set == S.size set'
-    then go ts set'
-    else case t of
-           App' _ f a -> go (ts :|> f :|> a) set'
-           All' _ h b -> go (ts :|> h :|> b) set'
-           Lam' _ h b -> go (ts :|> h :|> b) set'
-           Slf' _ t   -> go (ts :|> t) set'
-           Mu'  _     -> go (unroll' t :<| ts) set'
-           _          -> go ts set'
-    where set' = S.insert t set
-
--- Syntactic equality of first order trees
+-- Syntactic equality of first order trees, ignores reduction
 equalTerms' :: Term' -> Term' -> Bool
-equalTerms' term1' term2' = runEquivM' $ go [(term1', term2')] (allSubterms (fromList [term1', term2'])) where
-  go [] set = return True
-  go ((term1, term2) : pairs) set = case sameNode term1 term2 of
-    Just (Branch pair1 pair2) -> do
+equalTerms' term1' term2' = runEquivM' $ go [(term1', term2')] where
+  go [] = return True
+  go ((term1, term2) : pairs) = case sameNode' term1 term2 of
+    Branch' pair1 pair2 -> do
       b <- equivalent term1 term2
       if b
-        then go pairs set
-        else equate term1 term2 >> go (pair1 : pair2 : pairs) set
-    Just (Continue pair) -> do
+        then go pairs
+        else equate term1 term2 >> go (pair1 : pair2 : pairs)
+    Continue' pair -> do
       b <- equivalent term1 term2
       if b
-        then go pairs set
-        else equate term1 term2 >> go (pair : pairs) set
-    Just Leaf -> equate term1 term2 >> go pairs set
-    Nothing -> return False
+        then go pairs
+        else equate term1 term2 >> go (pair : pairs)
+    Leaf' -> equate term1 term2 >> go pairs
+    Stop' -> return False
 
 -- Equality of terms. A better `eval` function is needed, since we will also have recursive term-level functions
 equalTerms :: Term -> Term -> Bool
 equalTerms term1 term2 = equalTerms' (encode (eval term1)) (encode (eval term2))
 
 -- Tests
-forall n = All n Typ
-impl a b = All "" a (shiftVar b 1 0)
-
 test1 = forall "a" $ Mu "X" $ impl (Var 0) $ forall "b" $ impl (Var 0) (Rec 0)
 test2 = Mu "X" $ forall "a" $ impl (forall "c" $ impl (Var 1) (Var 0)) $ forall "b" $ impl (Var 0) (Rec 0)
 

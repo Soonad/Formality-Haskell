@@ -1,7 +1,9 @@
+{-# LANGUAGE FlexibleContexts #-}
 module SimplerCore where
 
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
+import Data.Equivalence.Monad
 
 type Name = Text
 
@@ -37,8 +39,8 @@ pretty t = go t [] []
 
     go :: Term -> [Text] -> [Text] -> Text
     go t vs rs = case t of
-      Var i                     -> if i < length vs then vs !! i else cat ["^", show' i]
-      Rec i                     -> if i < length rs then rs !! i else cat ["#", show' i]
+      Var i                     -> if i < length vs then vs !! i else cat ["^", show' (i - length vs)]
+      Rec i                     -> if i < length rs then rs !! i else cat ["#", show' (i - length rs)]
       Typ                       -> "Type"
       All n h@Typ b             -> cat ["∀(", n, "). ", go b (n : vs) rs]
       All n h@(All _ _ _) b     -> if hasFreeVar b 0 then cat ["(", n, " : ", go h vs rs, ") -> ", go b (n : vs) rs] else cat ["(", go h vs rs, ") -> ", go b (n : vs) rs]
@@ -125,6 +127,24 @@ substManyVar t vals d = go t vals d 0
       go (substVar t (shiftVar v (l - i) 0) (d + l - i)) vs d (i + 1)
     go t [] d i = t
 
+unroll :: Term -> Term
+unroll term = case term of
+  All n h b -> All n (unroll h) (unroll b)
+  Lam n h b -> Lam n (unroll h) (unroll b)
+  App f a   -> App (unroll f) (unroll a)
+  Mu n t    -> substRec t (Mu n t) 0
+  Slf n t   -> Slf n (unroll t)
+  _         -> term
+
+headForm :: Term -> Term
+headForm term = case term of
+  App f a -> case headForm f of
+               Lam _ _ b -> headForm (substVar b a 0)
+               f     -> App f a
+  Mu _ _  -> headForm (unroll term)
+  _       -> term
+
+-- Evaluation ignoring the unrolling of terms. This is enough for contractible substitutions
 eval :: Term -> Term
 eval term = case term of
   All n h b -> All n (eval h) (eval b)
@@ -138,21 +158,12 @@ eval term = case term of
   Slf n t   -> Slf n (eval t)
   _         -> term
 
-unroll :: Term -> Term
-unroll term = case term of
-  All n h b -> All n (unroll h) (unroll b)
-  Lam n h b -> Lam n (unroll h) (unroll b)
-  App f a   -> App (unroll f) (unroll a)
-  Mu n t    -> substRec t (Mu n t) 0
-  Slf n t   -> Slf n (unroll t)
-  _         -> term
-
 contractibleSubst :: Term -> Int -> Bool
 contractibleSubst t n = case t of
   Var i     -> i /= n
   Mu _ t    -> contractibleSubst t (n + 1)
-  Lam _ _ _ -> False
-  App _ _   -> False
+  Lam _ _ _ -> False 
+  App _ _   -> False 
   _         -> True
 
 -- The Lam and App cases could potentially be, instead
@@ -197,11 +208,53 @@ evalBohm term = case term of
   Slf n t   -> Slf n (evalBohm t)
   _         -> term
 
--- Examples of evaluation
-zero = Lam "Z" Any (Lam "S" Any (Var 1))
-suc = Lam "n" Any (Lam "Z" Any (Lam "S" Any (App (Var 0) (Var 2))))
-double = Mu "double" $ Lam "n" Any $ App (App (Var 0) zero) $ Lam "x" Any $ App suc $ App suc $ App (Rec 0) (Var 0)
-double'  = Lam "n" Any $ App (App (Var 0) zero) $ Mu "Rec" $  Lam "x" Any $ App suc $ App suc $ App (App (Var 0) zero) (Rec 0)
+-- Equality algorithm
+eraseNames :: Term -> Term
+eraseNames (App f a)   = App (eraseNames f) (eraseNames a)
+eraseNames (Lam _ h b) = Lam "" (eraseNames h) (eraseNames b)
+eraseNames (All _ h b) = All "" (eraseNames h) (eraseNames b)
+eraseNames (Slf _ t)   = Slf "" (eraseNames t)
+eraseNames (Mu  _ t)   = Mu  "" (eraseNames t)
+eraseNames term        = term
+  
+data Node a = Stop | Continue a | Branch a a
 
-two = evalBohm $ App double $ App suc zero
-four = evalBohm $ App double two
+sameNode :: Term -> Term -> Node (Term, Term)
+sameNode (App f a) (App f' a')     = Branch (headForm f, headForm f') (headForm a, headForm a')
+sameNode (Lam _ h b) (Lam _ h' b') = Branch (headForm h, headForm h') (headForm b, headForm b')
+sameNode (All _ h b) (All _ h' b') = Branch (headForm h, headForm h') (headForm b, headForm b')
+sameNode (Slf _ t) (Slf _ t')      = Continue (headForm t, headForm t')
+sameNode _ _                       = Stop
+
+equal :: Term -> Term -> Bool
+equal term1 term2 = runEquivM' $ go [(headForm (eraseNames term1), headForm (eraseNames term2))] where
+  go [] = return True
+  go ((term1, term2) : pairs) = do
+    b <- equivalent term1 term2
+    if b
+      then go pairs
+      else
+      case sameNode term1 term2 of
+        Branch pair1 pair2 -> equate term1 term2 >> go (pair1 : pair2 : pairs)
+        Continue pair -> equate term1 term2 >> go (pair : pairs)
+        Stop -> return False
+
+-- Examples
+forall n = All n Typ
+impl a b = All "" a (shiftVar b 1 0)
+
+zero    = Lam "Z" Any (Lam "S" Any (Var 1))
+suc     = Lam "n" Any (Lam "Z" Any (Lam "S" Any (App (Var 0) (Var 2))))
+-- Both definitions of double are equal
+double  = Mu "double" $ Lam "n" Any $ App (App (Var 0) zero) $ Lam "x" Any $ App suc $ App suc $ App (Rec 0) (Var 0)
+double' = Lam "n" Any $ App (App (Var 0) zero) $ Mu "Rec" $  Lam "x" Any $ App suc $ App suc $ App (App (Var 0) zero) (Rec 0)
+
+two  = App double $ App suc zero
+five = App suc $ App double two
+ten  = App suc $ App suc $ App suc $ App suc $ App suc $ five
+
+-- The equality of the terms `typeF1` and `typeF2` takes a couple of seconds in the current (February 2020) JavaScript Formality implementation
+-- but only takes a split second with the new equality algorithm
+someTypeF = Lam "n" Any $ Lam "P" (impl Any Typ) $ App (Var 0) (Var 1)
+typeF1     = App someTypeF (App double five)
+typeF2     = App someTypeF ten
