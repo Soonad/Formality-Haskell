@@ -1,9 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 module SimplerCore where
 
-import           Data.Text                  (Text)
-import qualified Data.Text                  as T
-import Data.Equivalence.Monad
+import Control.Applicative (liftA2)
+
+import           Data.Equivalence.Monad
+import           Data.Text (Text)
+import qualified Data.Text as T
+import           Data.Sequence (Seq(..))
+import qualified Data.Sequence as S
 
 type Name = Text
 
@@ -136,13 +140,19 @@ unroll term = case term of
   Slf n t   -> Slf n (unroll t)
   _         -> term
 
+untelescope :: Term -> [Term] -> Term
+untelescope term [] = term
+untelescope term (a : as) = untelescope (App term a) as
+
 headForm :: Term -> Term
-headForm term = case term of
-  App f a -> case headForm f of
-               Lam _ _ b -> headForm (substVar b a 0)
-               f     -> App f a
-  Mu _ _  -> headForm (unroll term)
-  _       -> term
+headForm term = go term [] where
+  go term apps = case term of
+    App f a   -> go f (a : apps)
+    Lam n h b  -> case apps of
+                    []       -> Lam n h b
+                    (a : as) -> go (substVar b a 0) as
+    Mu _ t    -> go (unroll term) (map headForm apps)
+    _         -> untelescope term apps
 
 -- Evaluation ignoring the unrolling of terms. This is enough for contractible substitutions
 eval :: Term -> Term
@@ -162,8 +172,8 @@ contractibleSubst :: Term -> Int -> Bool
 contractibleSubst t n = case t of
   Var i     -> i /= n
   Mu _ t    -> contractibleSubst t (n + 1)
-  Lam _ _ _ -> False 
-  App _ _   -> False 
+  Lam _ _ _ -> False
+  App _ _   -> False
   _         -> True
 
 -- The Lam and App cases could potentially be, instead
@@ -209,14 +219,19 @@ evalBohm term = case term of
   _         -> term
 
 -- Equality algorithm
-eraseNames :: Term -> Term
-eraseNames (App f a)   = App (eraseNames f) (eraseNames a)
-eraseNames (Lam _ h b) = Lam "" (eraseNames h) (eraseNames b)
-eraseNames (All _ h b) = All "" (eraseNames h) (eraseNames b)
-eraseNames (Slf _ t)   = Slf "" (eraseNames t)
-eraseNames (Mu  _ t)   = Mu  "" (eraseNames t)
-eraseNames term        = term
-  
+equivalentTerms term1 term2 = do
+  e <- equivalent term1 term2
+  if e
+    then return True
+    else
+    case (term1, term2) of
+      (Lam _ _ b, Lam _ _ b')  -> equivalentTerms b b'
+      (App f a, App f' a')     -> liftA2 (&&) (equivalentTerms f f') (equivalentTerms a a')
+      (All _ h b, All _ h' b') -> liftA2 (&&) (equivalentTerms h h') (equivalentTerms b b')
+      (Mu _ t, Mu _ t')        -> equivalentTerms t t'
+      (Slf _ t, Slf _ t')      -> equivalentTerms t t'
+      (_, _)                   -> return False
+
 data Node a = Stop | Continue a | Branch a a
 
 sameNode :: Term -> Term -> Node (Term, Term)
@@ -227,10 +242,10 @@ sameNode (Slf _ t) (Slf _ t')      = Continue (headForm t, headForm t')
 sameNode _ _                       = Stop
 
 equal :: Term -> Term -> Bool
-equal term1 term2 = runEquivM' $ go [(headForm (eraseNames term1), headForm (eraseNames term2))] where
+equal term1 term2 = runEquivM' $ go [(headForm term1, headForm term2)] where
   go [] = return True
   go ((term1, term2) : pairs) = do
-    b <- equivalent term1 term2
+    b <- equivalentTerms term1 term2
     if b
       then go pairs
       else
@@ -239,22 +254,35 @@ equal term1 term2 = runEquivM' $ go [(headForm (eraseNames term1), headForm (era
         Continue pair -> equate term1 term2 >> go (pair : pairs)
         Stop -> return False
 
--- Examples
+---- Examples
 forall n = All n Typ
 impl a b = All "" a (shiftVar b 1 0)
 
+-- Fixpoint Combinator
+fix = Lam "f" Any $ App (Lam "x" Any $ App (Var 1) $ App (Var 0) (Var 0)) (Lam "x" Any $ App (Var 1) $ App (Var 0) (Var 0))
+
+-- Scott encoded natural number constructors
 zero    = Lam "Z" Any (Lam "S" Any (Var 1))
 suc     = Lam "n" Any (Lam "Z" Any (Lam "S" Any (App (Var 0) (Var 2))))
--- Both definitions of double are equal
-double  = Mu "double" $ Lam "n" Any $ App (App (Var 0) zero) $ Lam "x" Any $ App suc $ App suc $ App (Rec 0) (Var 0)
-double' = Lam "n" Any $ App (App (Var 0) zero) $ Mu "Rec" $  Lam "x" Any $ App suc $ App suc $ App (App (Var 0) zero) (Rec 0)
 
-two  = App double $ App suc zero
-five = App suc $ App double two
-ten  = App suc $ App suc $ App suc $ App suc $ App suc $ five
+-- All the following definitions of double are equal
+double   = Mu "double" $ Lam "n" Any $ App (App (Var 0) zero) $ Lam "x" Any $ App suc $ App suc $ App (Rec 0) (Var 0)
+double'  = Lam "n" Any $ App (App (Var 0) zero) $ Mu "Rec" $  Lam "x" Any $ App suc $ App suc $ App (App (Var 0) zero) (Rec 0)
+double'' = App fix $ Lam "double" Any $ Lam "n" Any $ App (App (Var 0) zero) $ Lam "x" Any $ App suc $ App suc $ App (Var 2) (Var 0)
+
+one   = App suc zero
+two   = App suc one
+three = App suc two
+four  = App suc three
+five  = App suc $ App double two
+ten   = App double five
 
 -- The equality of the terms `typeF1` and `typeF2` takes a couple of seconds in the current (February 2020) JavaScript Formality implementation
 -- but only takes a split second with the new equality algorithm
 someTypeF = Lam "n" Any $ Lam "P" (impl Any Typ) $ App (Var 0) (Var 1)
 typeF1     = App someTypeF (App double five)
 typeF2     = App someTypeF ten
+
+-- also, the JS version is not able to prove that the following are equal
+regularType1  = Mu "" $ impl Any $ impl Any (Rec 0)
+regularType2 = impl Any $ Mu "" $ impl Any $ impl Any (Rec 0)
