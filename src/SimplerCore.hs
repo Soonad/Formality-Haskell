@@ -273,16 +273,26 @@ double'' = App fix $ Lam "double" Any $ Lam "n" Any $ App (App (Var 0) zero) $ L
 one   = App suc zero
 two   = App suc one
 three = App suc two
-four  = App suc three
-five  = App suc $ App double two
-ten   = App double five
+four  = App double two
+five  = App suc $ four
+ten   = App suc $ App suc $ App suc $ App suc $ App suc five
 
 -- The equality of the terms `typeF1` and `typeF2` takes a couple of seconds in the current (February 2020) JavaScript Formality implementation
 -- but only takes a split second with the new equality algorithm
-someTypeF = Lam "n" Any $ Lam "P" (impl Any Typ) $ App (Var 0) (Var 1)
-typeF1     = App someTypeF (App double five)
-typeF2     = App someTypeF ten
+typeF0 = Lam "n" Any $ Lam "P" (impl Any Typ) $ App (Var 0) (Var 1)
+typeF1     = App typeF0 (App double five)
+typeF2     = App typeF0 ten
 
 -- also, the JS version is not able to prove that the following are equal
 regularType1  = Mu "" $ impl Any $ impl Any (Rec 0)
 regularType2 = impl Any $ Mu "" $ impl Any $ impl Any (Rec 0)
+
+-- The algorithm also works on irregular terms
+someFunc    = Lam "n" Any $ App (App (Var 0) zero) (Lam "pred" Any (Var 1))
+someTypeF   = Mu  "X" $ Lam "A" Any $ Lam "n" Any $ impl (App (Var 1) (App someFunc (Var 0))) $ App (App (Rec 0) (Var 1)) (App suc (Var 0))
+-- the first two are equal terms
+someType1  = Lam "A" Any $ App (App someTypeF (Var 0)) zero
+someType2  = Lam "A" Any $ impl (App (Var 0) zero) $ impl (App (Var 0) one) $ impl (App (Var 0) two) $ impl (App (Var 0) three) $ App (App someTypeF (Var 0)) four
+-- the algorithm is quickly able to check that the following is not equal to either of the last two terms, while in the JS version it takes a couple of seconds
+someType3 = Lam "" Any $ impl (App (Var 0) zero) $ impl (App (Var 0) one) $ impl (App (Var 0) two) $ impl (App (Var 0) three) $ App (App someTypeF (Var 0)) three
+notEq = equal someType1 someType3
