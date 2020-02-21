@@ -19,7 +19,7 @@ library
                      Check
                      Pretty
                      Unify
-                     Equality
+--                     Equality
                      --SimplerCore
   build-depends:
     base
@@ -33,27 +33,27 @@ library
     , equivalence
   default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
 
-executable fide
-  main-is: Main.hs
-  build-depends:
-    base
-    , containers
-    , transformers
-    , megaparsec
-    , mtl
-    , text
-    , vector
-    , process
-    , repline
-    , haskeline
-  other-modules: Core
-                 Lang
-                 Fide
-                 Check
-                 Pretty
-                 HaskelineT
-  default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
-  hs-source-dirs: fide src
+--executable fide
+--  main-is: Main.hs
+--  build-depends:
+--    base
+--    , containers
+--    , transformers
+--    , megaparsec
+--    , mtl
+--    , text
+--    , vector
+--    , process
+--    , repline
+--    , haskeline
+--  other-modules: Core
+--                 Lang
+--                 Fide
+--                 Check
+--                 Pretty
+--                 HaskelineT
+--  default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
+--  hs-source-dirs: fide src
 
 test-suite test
   type: exitcode-stdio-1.0
@@ -75,9 +75,9 @@ test-suite test
   other-modules: Runtime.Net
                 , Spec.Lang
                 , Spec.Net
-                , Spec.Core
+--                , Spec.Core
                 , Core
-                , CoreSyn
+--                , CoreSyn
                 , Lang
                 , Check
                 , Pretty

@@ -46,5 +46,5 @@ pretty t = go t []
       Ann x y        -> cat [go y s, " :: ", go x s]
       Log x y        -> cat ["log(", go x s, "); ", go y s]
       Hol n          -> cat ["?", n]
-      Ref n i        -> n
+      Ref n          -> n
 

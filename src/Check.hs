@@ -44,14 +44,14 @@ type Constraint = (CheckEnv, Term, Term)
 
 data CheckState = CheckState
   { _holCount      :: Int
-  , _refTypes      :: M.Map ID Term
+  , _refTypes      :: M.Map Name Term
   } deriving Show
 
 data CheckError
   = ErasedInKeptPosition Name
   | ErasureMismatch Term
   | UnboundVariable Int CheckEnv
-  | UndefinedRefInModule Name ID Module
+  | UndefinedRefInModule Name Module
   deriving Show
 
 type Check a = ExceptT CheckError (RWS CheckEnv CheckLog CheckState) a
@@ -144,18 +144,18 @@ check term = case term of
     writeLog (m, eval (erase mT) mod, ctx)
     check x
   Hol n -> return $ Hol (n `T.append` "_type")
-  Ref n i -> do
-    ds <- asks (_terms . _module)
+  Ref n -> do
+    ds <- asks (_defs . _module)
     rs <- gets _refTypes
-    case (M.lookup i ds, M.lookup i rs) of
+    case (M.lookup n ds, M.lookup n rs) of
       (Just t, Just tT)  -> return tT
       (Just t , Nothing) -> do
         tT <- check t
-        modify (\s -> s { _refTypes = M.insert i tT (_refTypes s)})
+        modify (\s -> s { _refTypes = M.insert n tT (_refTypes s)})
         return tT
       _                  -> do
         m <- asks _module
-        throwError $ UndefinedRefInModule n i m
+        throwError $ UndefinedRefInModule n m
   Ann t x -> expect t x
 
 runCheck :: CheckEnv

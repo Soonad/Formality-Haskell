@@ -18,15 +18,6 @@ data Eras = Eras  -- Erase from runtime
           | Keep  -- Keep at runtime
           deriving (Show, Eq, Ord)
 
-newtype ID = ID { unID :: Int } deriving (Eq, Ord)
-
-instance Enum ID where
-  toEnum = ID
-  fromEnum = unID
-
-instance Show ID where
-  show (ID n) = "#" ++ show n
-
 -- Core.Term
 data Term
   = Var Int                    -- Variable
@@ -45,16 +36,15 @@ data Term
   | Ann Term Term              -- Type annotation
   | Log Term Term              -- inline log
   | Hol Name                   -- type hole or metavariable
-  | Ref Name ID               -- reference to a definition
+  | Ref Name                   -- reference to a definition
   deriving (Eq, Show, Ord)
 
 data Module = Module
-  { _terms :: M.Map ID Term   -- Either top-level or local definitions
-  , _names :: M.Map Name ID   -- Top-level definitions (must be closed terms)
+  { _defs :: M.Map Name Term   -- Either top-level or local definitions
   } deriving (Eq, Show, Ord)
 
 emptyModule :: Module
-emptyModule = Module M.empty M.empty
+emptyModule = Module M.empty
 
 data Op = ADD | SUB | MUL | DIV | MOD | EQL
 -- | POW | AND | BOR | XOR | NOT | SHR | SHL | GTH | LTH | EQL
@@ -79,7 +69,7 @@ shift term inc dep = let go x = shift x inc dep in case term of
   Ann t x      -> Ann (go t) (go x)
   Log m x      -> Log (go m) (go x)
   Hol n        -> Hol n
-  Ref n i      -> Ref n i
+  Ref n        -> Ref n
 
 -- substitute a value for an index at a certain depth
 subst :: Term -> Term -> Int -> Term
@@ -104,7 +94,7 @@ subst term v dep =
   Ann t x     -> Ann (go t) (go x)
   Log m x     -> Log (go m) (go x)
   Hol n       -> Hol n
-  Ref n i     -> Ref n i
+  Ref n       -> Ref n
 
 substMany :: Term -> [Term] -> Int -> Term
 substMany t vals d = go t vals d 0
@@ -113,8 +103,8 @@ substMany t vals d = go t vals d 0
     go t (v:vs) d i = go (subst t (shift v (l - i) 0) (d + l - i)) vs d (i + 1)
     go t [] d i = t
 
-dereference :: Name -> ID -> Module -> Term
-dereference n i defs = maybe (Ref n i) id (M.lookup i (_terms defs))
+dereference :: Name -> Module -> Term
+dereference n defs = maybe (Ref n) id (M.lookup n (_defs defs))
 
 -- deBruijn
 eval :: Term -> Module -> Term
@@ -127,7 +117,7 @@ eval term mod = go term
     App f a e   -> case (go f) of
       Lam n h e b  -> go (subst b a 0)
       f            -> App f (go a) e
-    New t x      -> go x 
+    New t x      -> go x
     Use x        -> go x 
     Op1 o a b    -> case go b  of
       Val n -> Val $ op o a n
@@ -140,9 +130,9 @@ eval term mod = go term
       x     -> Ite x t f
     Ann t x     -> go x 
     Log m x     -> Log (go m) (go x)
-    Ref n i      -> case (dereference n i mod) of
-      Ref n' i'  -> if n' == n && i == i' then Ref n i
-                    else go (dereference n' i' mod)
+    Ref n       -> case (dereference n mod) of
+      Ref n' -> if n' == n then Ref n
+                else go (dereference n' mod)
       x          -> go x
     _           -> t
 
@@ -169,7 +159,6 @@ erase term = case term of
   Slf n t        -> Slf n (erase t)
   New t x        -> erase x
   Use x          -> erase x
-  -- Let bs t       -> Let (erase <$> bs) (erase t)
   Ann t x        -> erase x
   Log m x        -> Log (erase m) (erase x)
   _              -> term

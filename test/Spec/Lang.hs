@@ -81,54 +81,33 @@ spec = do
 
   describe "Application" $ do
     it "function style applications: \"f(a)\"" $ do
-      parse' expr "f(a)" `shouldBe` (Just (App (Ref "f" 0) (Ref "a" 0) Keep))
+      parse' group' "f(a)" `shouldBe` (Just (App (Ref "f" 0) (Ref "a" 0) Keep))
     it "multiple arguments: \"f(a,b,c)\"" $ do
-      parse' expr "f(a,b)" `shouldBe` 
+      parse' group' "f(a,b)" `shouldBe` 
         (Just (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep))
-      parse' expr "f(a,b,c)" `shouldBe` 
+      parse' group' "f(a,b,c)" `shouldBe` 
         (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep) (Ref "c" 0) Keep))
     it "parenthesized arguments: \"f(a)(b)(c)\"" $ do
-      parse' expr "f(a)(b)(c)" `shouldBe` 
+      parse' group' "f(a)(b)(c)" `shouldBe` 
         (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep) (Ref "c" 0) Keep))
     it "erased parenthesized arguments: \"f(a;)(b;)(c;)\"" $ do
-      parse' expr "f(a;)(b;)(c;)" `shouldBe` 
+      parse' group' "f(a;)(b;)(c;)" `shouldBe` 
         (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Eras) (Ref "b" 0) Eras) (Ref "c" 0) Eras))
     it "erased arguments: \"f(a;b;c;)\"" $ do
-      parse' expr "f(a;b;c;)" `shouldBe` 
+      parse' group' "f(a;b;c;)" `shouldBe` 
         (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Eras) (Ref "b" 0) Eras) (Ref "c" 0) Eras))
     it "applying a lambda: \"((x) => x)(a,b)\"" $ do
-      parse' expr "((x) => x)(a,b)" `shouldBe` 
+      parse' group' "((x) => x)(a,b)" `shouldBe` 
         (Just (App (App (Lam "x" (Hol "#0") Keep (Var 0)) (Ref "a" 0) Keep) (Ref "b" 0) Keep))
     it "lambda style applications: \"(f a b c)\"" $ do
-      parse' expr "(f a b c)" `shouldBe`
+      parse' group' "(f a b c)" `shouldBe`
         (Just (App (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep) (Ref "c" 0) Keep))
     it "lambda style applications: \"(f (a b) c)\"" $ do
-      parse' expr "(f (a b) c)" `shouldBe`
+      parse' group' "(f (a b) c)" `shouldBe`
         (Just (App (App (Ref "f" 0) (App (Ref "a" 0) (Ref "b" 0) Keep) Keep) (Ref "c" 0) Keep))
-      parse' expr "(f (a (b c)))" `shouldBe`
+      parse' group' "(f (a (b c)))" `shouldBe`
         (Just (App (Ref "f" 0) (App (Ref "a" 0) (App (Ref "b" 0) (Ref "c" 0) Keep) Keep) Keep))
 
-  describe "Def" $ do
-    it "bare-style definitions: \"a 1\"" $ do
-      parse' def "a 1" `shouldBe` (Just ("a",Val 1))
-    it "equals-style definitions: \"a = 1\"" $ do
-      parse' def "a = 1" `shouldBe` (Just ("a",Val 1))
-    it "definitions with arguments: \"a(x) 1\"" $ do
-      parse' def "a(x) 1" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Val 1)))
-    it "definitions with arguments: \"a(x) x\"" $ do
-      parse' def "a(x) x" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Var 0)))
-    it "equals-style definitions with arguments: \"a(x) = 1\"" $ do
-      parse' def "a(x) = 1" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Val 1)))
-    it "definitions with types: \"a : Number 1\"" $ do
-      parse' def "a : Number 1" `shouldBe` (Just ("a",Ann Num (Val 1)))
-    it "definitions with types: \"a : Number = 1\"" $ do
-      parse' def "a : Number = 1" `shouldBe` (Just ("a",Ann Num (Val 1)))
-    it "definitions with arguments and types: \"a(A : Type, x : A) : A = x\"" $ do
-      parse' def "a(A : Type, x : A) : A = x" `shouldBe`
-        Just ("a"
-        , Ann (All "A" Typ Keep (All "x" (Var 0) Keep (Var 1)))
-              (Lam "A" Typ Keep (Lam "x" (Var 0) Keep (Var 0)))
-        )
 
   describe "Let" $ do
     it "simple let" $ do
@@ -240,3 +219,39 @@ spec = do
       it "\"let (x = 1 y = 2) y\"" $ do
         parse' term "let (x = 1 y = 2); y" `shouldBe`
           (Just $ (Let (M.fromList [("x",Val 1),("y",Val 2)]) (Ref "y" 0)))
+
+  describe "Def" $ do
+    it "bare-style definitions: \"a 1\"" $ do
+      parse' expr' "a 1" `shouldBe` (Just ("a",Val 1))
+    it "equals-style definitions: \"a = 1\"" $ do
+      parse' expr' "a = 1" `shouldBe` (Just ("a",Val 1))
+    it "definitions with arguments: \"a(x) 1\"" $ do
+      parse' expr' "a(x) 1" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Val 1)))
+    it "definitions with arguments: \"a(x) x\"" $ do
+      parse' expr' "a(x) x" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Var 0)))
+    it "equals-style definitions with arguments: \"a(x) = 1\"" $ do
+      parse' expr' "a(x) = 1" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Val 1)))
+    it "definitions with types: \"a : Number 1\"" $ do
+      parse' expr' "a : Number 1" `shouldBe` (Just ("a",Ann Num (Val 1)))
+    it "definitions with types: \"a : Number = 1\"" $ do
+      parse' expr' "a : Number = 1" `shouldBe` (Just ("a",Ann Num (Val 1)))
+    it "definitions with arguments and types: \"a(A : Type, x : A) : A = x\"" $ do
+      parse' expr' "a(A : Type, x : A) : A = x" `shouldBe`
+        Just ("a"
+        , Ann (All "A" Typ Keep (All "x" (Var 0) Keep (Var 1)))
+              (Lam "A" Typ Keep (Lam "x" (Var 0) Keep (Var 0)))
+        )
+
+  describe "ADT" $ do
+    it "T Empty" $ do
+        parse' data_ "T Empty" `shouldBe` (Just $ Data "Empty" [] [] [])
+    it "T Bool | true | false" $ do
+        parse' data_ "T Bool | true | false" `shouldBe` 
+          (Just $ Data "Bool" [] [] [Ctor "true" [] Nothing, Ctor "false" [] Nothing])
+    it "T The{A} (x : A) | the(x : A) : The(A,x)" $ do
+        parse' data_ "T The{A} (x : A) | the(x : A) : The(A,x)" `shouldBe`
+          (Just $ 
+            Data "The" [("A", Hol "#0")] [("x", Var 0)] 
+              [Ctor "the" [("x", Var 0)]
+                (Just (App (App (Ref "The" 0) (Var 1) Keep) (Var 0) Keep))])
+

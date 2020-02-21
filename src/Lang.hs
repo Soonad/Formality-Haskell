@@ -28,24 +28,41 @@ import           Pretty
 
 -- Lang.Term, this includes syntax sugars like `Let`
 data Term
-  = Var Int                    -- Variable
-  | Typ                        -- Type type
-  | All Name Term Eras Term    -- Forall
-  | Lam Name Term Eras Term    -- Lambda
-  | App Term Term Eras         -- Application
-  | Slf Name Term              -- Self-type
-  | New Term Term              -- Self-type introduction
-  | Use Term                   -- Self-type elimination
-  | Let (Map Name Term) Term   -- Recursive locally scoped definition
-  | Num                        -- Number type
-  | Val Int                    -- Number Value
-  | Opr Op Term Term           -- Binary operation
-  | Ite Term Term Term         -- If-then-else
-  | Ann Term Term              -- Type annotation
-  | Log Term Term              -- inline log
-  | Hol Name                   -- type hole or metavariable
-  | Ref Name Int               -- reference to a definition
+  = Var Int                      -- Variable
+  | Typ                          -- Type type
+  | All Name Term Eras Term      -- Forall
+  | Lam Name Term Eras Term      -- Lambda
+  | App Term Term Eras           -- Application
+  | Slf Name Term                -- Self-type
+  | New Term Term                -- Self-type introduction
+  | Use Term                     -- Self-type elimination
+  | Let (Map Name Term) Term     -- Recursive locally scoped definition
+  | Whn [(Term, Term)] Term      -- When-statement
+  | Swt Term [(Term,Term)] Term  -- Switch-statement
+  | Cse Term [(Name, Term)] Term -- Case-statement
+  | Rwt Term Term Term           -- Rewrite
+  | Num                          -- Number type
+  | Val Int                      -- Number Value
+  | Opr Op Term Term             -- Binary operation
+  | Ite Term Term Term           -- If-then-else
+  | Ann Term Term                -- Type annotation
+  | Log Term Term                -- inline log
+  | Hol Name                     -- type hole or metavariable
+  | Ref Name Int                 -- reference to a definition
   deriving (Eq, Show, Ord)
+
+data Def
+  = Expr Name Term
+  | Enum [Name]
+  | Data Name [Param] [Index] [Ctor]
+  | Impt Text Text
+  deriving (Eq, Show, Ord)
+
+type Param = (Name,Term)
+type Index = (Name,Term)
+data Ctor = Ctor Name [Param] (Maybe Term) deriving (Eq, Show, Ord)
+
+data Module = Module [Def]
 
 -- binders can bind variables (deBruijn) or references
 data Binder = VarB Name | RefB Name deriving (Eq, Show)
@@ -116,7 +133,7 @@ name = do
     nameSymbol :: [Char]
     nameSymbol = "_.#-@/'"
     reservedWords :: [Text]
-    reservedWords = ["let", "rewrite"]
+    reservedWords = ["let", "rewrite", "T"]
 
 -- resolves if a name is a variable or reference
 refVar :: Parser Term
@@ -151,23 +168,25 @@ typ = lit "Type" >> return Typ
 -- forall or lambda
 allLam :: Parser Term
 allLam = do
-  bs <- binds
+  bs <- binds True "(" ")"
   sc
   ctor <- (sym "->" >> return All) <|> (sym "=>" >> return Lam)
   sc
-  body <- binders ((\(x,y,z) -> VarB x) <$> bs) expr
+  body <- binders ((\(x,y,z) -> VarB x) <$> bs) group'
   return $ foldr (\(n,t,e) x -> ctor n t e x) body bs
 
 -- binders in a forall or lambda
-binds :: Parser [(Name, Term, Eras)]
-binds = sym "(" >> go
+binds :: Bool -> Text -> Text -> Parser [(Name, Term, Eras)]
+binds erasable start end = sym start >> go
   where
-    go = (sc >> lit ")" >> return []) <|> next
+    go = (sc >> lit end >> return []) <|> next
 
     next :: Parser [(Name,Term,Eras)]
     next = do
       (b, bT) <- binderAndType
-      e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
+      e <- if erasable
+           then optional $ (sc >> sym ",") <|> (sc >> sym ";")
+           else optional (sc >> sym ",")
       case e of
         Just ";" -> (do bs <- binders [VarB b] $ go; return $ (b,bT,Eras) : bs)
         _        -> (do bs <- binders [VarB b] $ go; return $ (b,bT,Keep) : bs)
@@ -199,6 +218,12 @@ group = do
   sym "("
   ts <- sc >> sepEndBy1 term sc
   lit ")"
+  return $ foldl1 (\x y -> App x y Keep) ts
+
+-- an term with lambda-style whitespace applications
+group' :: Parser Term
+group' = do
+  ts <- some term
   return $ foldl1 (\x y -> App x y Keep) ts
 
 -- a self-type
@@ -311,38 +336,76 @@ opr x = do
     "==" -> return $ Opr EQL x y
     f    -> return $ App (App (Ref f 0) x Keep) y Keep
 
--- an expression with lambda-style applications
-expr :: Parser Term
-expr = do
-  ts <- some term
-  return $ foldl1 (\x y -> App x y Keep) ts
+def :: Parser Def
+def = choice
+  [ try $ expr
+--  , try $ enum
+  , try $ data_
+--  , try $ import_
+  ]
 
--- a definition
-def :: Parser (Name,Term)
-def = do
+expr :: Parser Def
+expr = do
+  (n,t) <- expr'
+  return $ Expr n t
+
+expr' :: Parser (Name, Term)
+expr' = do
   n  <- name
   ls <- asks _block
   when (Set.member n ls) (fail "attempted to redefine a name")
-  bs <- (optional $ binds)
+  bs <- (optional $ binds True "(" ")")
   sc
   let ns = maybe [] (fmap (\(a,b,c) -> VarB a)) bs
   t  <- optional (sym ":" >> binders ns term <* sc)
   optional (sym "=")
-  d  <- binders ns expr
-  case (bs, t) of
-    (Nothing, Nothing) -> return (n, d)
-    (Nothing, Just t)  -> return $ (n, Ann t d)
-    (Just bs, Nothing) -> return $ (n, foldr (\(n,t,e) x -> Lam n t e x) d bs)
-    (Just bs, Just t) -> 
-      let typ = foldr (\(n,t,e) x -> All n t e x) t bs
-          trm = foldr (\(n,t,e) x -> Lam n t e x)  d bs
-       in return $ (n, Ann typ trm)
+  d  <- binders ns term
+  let x = case (bs, t) of
+       (Nothing, Nothing) -> d
+       (Nothing, Just t)  -> Ann t d
+       (Just bs, Nothing) -> foldr (\(n,t,e) x -> Lam n t e x) d bs
+       (Just bs, Just t) -> Ann
+         (foldr (\(n,t,e) x -> All n t e x) t bs)
+         (foldr (\(n,t,e) x -> Lam n t e x) d bs)
+  return $ (n,x)
+
+enum :: Parser Def
+enum = do
+  sym "enum"
+  Enum <$> some (sym "|" >> name)
+
+data_ :: Parser Def
+data_ = do
+  sym "T"
+  n <- name
+  ps <- optional' $ binds False "{" "}"
+  sc
+  is <- optional' $ binders ((\(x,y,z) -> VarB x) <$> ps) (binds False "(" ")")
+  sc
+  cs <- binders ((\(x,y,z) -> VarB x) <$> ps) (many (sym "|" >> ctor))
+  return $ Data n (f <$> ps) (f <$> is) cs
+  where
+  f (a,b,c) = (a,b)
+
+  optional' :: Parser [a] -> Parser [a]
+  optional' p = maybe [] id <$> (optional p)
+
+  ctor :: Parser Ctor
+  ctor = do
+    n  <- name
+    ps <- optional' (binds True "(" ")")
+    sc
+    ix <- optional (sym ":" >> binders ((\(x,y,z) -> VarB x) <$> ps) term <* sc)
+    return $ Ctor n (f <$> ps) ix
+
+--import_ :: Parser Def
+--import_ = undefined
 
 let_ :: Parser Term
 let_ = do
   sym "let"
-  ds <- (sym "(" >> lets) <|> (pure <$> (def <* sepr))
-  t <- binders ((\(a, b) -> RefB a) <$> ds) $ expr
+  ds <- (sym "(" >> lets) <|> (pure <$> (expr' <* sepr))
+  t <- binders ((\(a, b) -> RefB a) <$> ds) $ group'
   return $ Let (M.fromList ds) t
   where
     lets :: Parser [(Name, Term)]
@@ -351,7 +414,7 @@ let_ = do
     next :: Parser [(Name, Term)]
     next = do
      ls    <- asks _block
-     (n,t) <- def <* sepr
+     (n,t) <- expr' <* sepr
      when (Set.member n ls) (fail "attempted to redefine a name")
      ns <- block n $ lets
      return $ (n,t) : ns
@@ -360,20 +423,20 @@ let_ = do
     sepr :: Parser (Maybe Text)
     sepr = sc >> optional (sym ";" <|> sym ",")
 
-module_ :: Parser (M.Map Name Term)
-module_ = sc >> M.fromList <$> defs
-  where
-    defs :: Parser [(Name, Term)]
-    defs = (sepr >> eof >> return []) <|> next
-
-    next :: Parser [(Name, Term)]
-    next = do
-     ls    <- asks _block
-     (n,t) <- def <* sepr
-     when (Set.member n ls) (fail "attempted to redefine a name")
-     ns <- block n $ defs
-     return $ (n,t) : ns
-
-    sepr :: Parser (Maybe Text)
-    sepr = sc >> optional (sym ";" <|> sym ",")
+--module_ :: Parser (M.Map Name Term)
+--module_ = sc >> M.fromList <$> defs
+--  where
+--    defs :: Parser [(Name, Term)]
+--    defs = (sepr >> eof >> return []) <|> next
+--
+--    next :: Parser [(Name, Term)]
+--    next = do
+--     ls    <- asks _block
+--     (n,t) <- def <* sepr
+--     when (Set.member n ls) (fail "attempted to redefine a name")
+--     ns <- block n $ defs
+--     return $ (n,t) : ns
+--
+--    sepr :: Parser (Maybe Text)
+--    sepr = sc >> optional (sym ";" <|> sym ",")
 
