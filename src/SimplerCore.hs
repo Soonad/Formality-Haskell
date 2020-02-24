@@ -12,7 +12,7 @@ import qualified Data.Sequence as S
 
 type Name = Text
 
-data Dir  = Lft | Rgt | BRgt | BCtr deriving (Eq, Show, Ord)
+data Dir  = Lft | Rgt | Ctr deriving (Eq, Show, Ord)
 type Path = Seq Dir
 
 data Term
@@ -195,23 +195,23 @@ data Node a = Stop | Continue a | Branch a a
 
 sameNode :: Term -> Term -> Path -> Node (Term, Term, Path)
 sameNode (App f a) (App f' a')     ps = Branch (headFormPlus f, headFormPlus f', ps :|> Lft) (headFormPlus a, headFormPlus a', ps :|> Rgt)
-sameNode (Lam _ h b) (Lam _ h' b') ps = Branch (headFormPlus h, headFormPlus h', ps :|> Lft) (headFormPlus $ substVar b (Bound ps) 0, headFormPlus $ substVar b' (Bound ps) 0, ps :|> BRgt)
-sameNode (All _ h b) (All _ h' b') ps = Branch (headFormPlus h, headFormPlus h', ps :|> Lft) (headFormPlus $ substVar b (Bound ps) 0, headFormPlus $ substVar b' (Bound ps) 0, ps :|> BRgt)
-sameNode (Slf _ t) (Slf _ t')      ps = Continue (headFormPlus $ substVar t (Bound ps) 0, headFormPlus $ substVar t' (Bound ps) 0, ps :|> BCtr)
+sameNode (Lam _ h b) (Lam _ h' b') ps = Branch (headFormPlus h, headFormPlus h', ps :|> Lft) (headFormPlus $ substVar b (Bound ps) 0, headFormPlus $ substVar b' (Bound ps) 0, ps :|> Rgt)
+sameNode (All _ h b) (All _ h' b') ps = Branch (headFormPlus h, headFormPlus h', ps :|> Lft) (headFormPlus $ substVar b (Bound ps) 0, headFormPlus $ substVar b' (Bound ps) 0, ps :|> Rgt)
+sameNode (Slf _ t) (Slf _ t')      ps = Continue (headFormPlus $ substVar t (Bound ps) 0, headFormPlus $ substVar t' (Bound ps) 0, ps :|> Ctr)
 sameNode _ _                       ps = Stop
 
 equal :: Term -> Term -> Bool
-equal term1 term2 = runEquivM' $ go [(headFormPlus $ freeUnboundVars term1, headFormPlus $ freeUnboundVars term2, Empty)] where
-  go [] = return True
-  go ((term1, term2, ps) : tris) = do
+equal term1 term2 = runEquivM' $ go (S.singleton (headFormPlus $ freeUnboundVars term1, headFormPlus $ freeUnboundVars term2, Empty)) where
+  go Empty = return True
+  go ((term1, term2, ps) :<| tris) = do
     b <- equivalentTerms term1 term2
     equate term1 term2
     if b
       then go tris
       else
       case sameNode term1 term2 ps of
-        Branch tri1 tri2 -> go (tri1 : tri2 : tris)
-        Continue tri -> go (tri : tris)
+        Branch tri1 tri2 -> go (tris :|> tri1 :|> tri2)
+        Continue tri -> go (tris :|> tri)
         Stop -> return False
 
 ---- Examples
@@ -244,8 +244,8 @@ typeF1     = App typeF0 (App double five)
 typeF2     = App typeF0 ten
 
 -- also, the JS version is not able to prove that the following are equal
-regularType1  = Mu "" $ impl Any $ impl Any (Rec 0)
-regularType2 = impl Any $ Mu "" $ impl Any $ impl Any (Rec 0)
+regularType1  = Mu "X" $ impl Any $ impl Any (Rec 0)
+regularType2 = impl Any $ Mu "X" $ impl Any $ impl Any (Rec 0)
 
 -- neither can it prove that `regularType4` is equivalent to `regularType3` after reduction
 regularType3 = Lam "A" Typ $ Mu "X" $ impl (Var 0) (Rec 0)
@@ -261,3 +261,17 @@ someType2  = Lam "A" Any $ impl (App (Var 0) zero) $ impl (App (Var 0) one) $ im
 someType3 = Lam "" Any $ impl (App (Var 0) zero) $ impl (App (Var 0) one) $ impl (App (Var 0) two) $ impl (App (Var 0) three) $ App (App someTypeF (Var 0)) three
 notEq = equal someType1 someType3
 
+-- Bool type
+boolConstructor  b t f = Slf "self" $ All "P" (impl b Typ) $ impl (App (Var 0) t) $ impl (App (Var 0) f) $ App (Var 0) (Var 1)
+trueConstructor  b t f = Lam "P" (impl b Typ) $ Lam "case_true" (App (Var 0) t) $ Lam "case_false" (App (Var 1) f) (Var 1)
+falseConstructor b t f = Lam "P" (impl b Typ) $ Lam "case_true" (App (Var 0) t) $ Lam "case_false" (App (Var 1) f) (Var 0)
+
+bool  = Mu "Bool"  $ boolConstructor (Rec 0)
+  (Mu "true"  $ trueConstructor  (Rec 1) (Rec 0) (Mu "false" $ falseConstructor (Rec 2) (Rec 1) (Rec 0)))
+  (Mu "false" $ falseConstructor (Rec 1) (Mu "true"  $ trueConstructor  (Rec 2) (Rec 0) (Rec 1)) (Rec 0))
+true  = Mu "True"  $ trueConstructor  bool (Rec 0) (Mu "false" $ falseConstructor bool (Rec 1) (Rec 0))
+false = Mu "False" $ falseConstructor bool true (Rec 0)
+
+boolEq  = equal bool  (boolConstructor  bool true false)
+trueEq  = equal true  (trueConstructor  bool true false)
+falseEq = equal false (falseConstructor bool true false)
