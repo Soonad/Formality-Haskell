@@ -6,23 +6,30 @@ import Control.Applicative (liftA2)
 import           Data.Equivalence.Monad
 import           Data.Text (Text)
 import qualified Data.Text as T
+import           Data.Text.IO as I (putStrLn)
 import           Data.Sequence (Seq(..))
 import qualified Data.Sequence as S
 
 type Name = Text
 
+data Dir  = Lft | Rgt | BRgt | BCtr deriving (Eq, Show, Ord)
+type Path = Seq Dir
+
 data Term
   = Var Int
-  | Typ
-  | Val Int
-  | Num
-  | Lam Name Term Term
-  | App Term Term
-  | All Name Term Term
-  | Mu Name Term
-  | Any -- Type of any term
   | Rec Int
+  | App Term Term
+  | Lam Name Term Term
+  | All Name Term Term
   | Slf Name Term
+  | Mu  Name Term
+  | Any
+  | Typ
+  | Num
+  | Val Int
+  -- The following should only be used by the equality algorithm
+  | Bound Path
+  | Free Int
   deriving (Eq, Show, Ord)
 
 hasFreeVar :: Term -> Int -> Bool
@@ -35,8 +42,8 @@ hasFreeVar term n = case term of
   Mu  _ t      -> hasFreeVar t n
   _            -> False
 
-pretty :: Term -> Text
-pretty t = go t [] []
+pretty :: Term -> IO ()
+pretty t = I.putStrLn $ go t [] []
   where
     show' = T.pack . show
     cat   = T.concat
@@ -65,6 +72,8 @@ pretty t = go t [] []
       Num                       -> "Number"
       Val i                     -> show' i
       Any                       -> "Any"
+      Free i                    -> cat ["Free(", show' i, ")"]
+      Bound ps                  -> cat ["Bound(", T.pack $ show ps, ")"]
 
 shiftVar :: Term -> Int -> Int -> Term
 shiftVar term inc dep = case term of
@@ -112,17 +121,6 @@ substRec term v dep = case term of
     vV = shiftVar v 1 0
     vR = shiftRec v 1 0
 
-maxFreeVar :: Term -> Int
-maxFreeVar term = go term 0 where
-  go term n = case term of
-    Var i        -> if i < n then 0 else i-n
-    All _ h b    -> go h n `max` go b (n + 1)
-    Lam _ h b    -> go h n `max` go b (n + 1)
-    App f a      -> go f n `max` go a n
-    Slf _ t      -> go t (n + 1)
-    Mu _ t       -> go t n
-    _            -> 0
-
 substManyVar :: Term -> [Term] -> Int -> Term
 substManyVar t vals d = go t vals d 0
   where
@@ -144,81 +142,42 @@ untelescope :: Term -> [Term] -> Term
 untelescope term [] = term
 untelescope term (a : as) = untelescope (App term a) as
 
-headForm :: Term -> Term
-headForm term = go term [] where
+headFormPlus :: Term -> Term
+headFormPlus term = go term [] where
   go term apps = case term of
     App f a   -> go f (a : apps)
     Lam n h b  -> case apps of
                     []       -> Lam n h b
                     (a : as) -> go (substVar b a 0) as
-    Mu _ t    -> go (unroll term) (map headForm apps)
+    Mu _ t    -> go (unroll term) (map headFormPlus apps)
     _         -> untelescope term apps
 
 -- Evaluation ignoring the unrolling of terms. This is enough for contractible substitutions
-eval :: Term -> Term
-eval term = case term of
-  All n h b -> All n (eval h) (eval b)
-  Lam n h b -> Lam n (eval h) (eval b)
+evalNoMu :: Term -> Term
+evalNoMu term = case term of
+  All n h b -> All n (evalNoMu h) (evalNoMu b)
+  Lam n h b -> Lam n (evalNoMu h) (evalNoMu b)
   App f a   ->
-    let a' = eval a
-    in case eval f of
-      Lam _ _ b -> eval (substVar b a' 0)
+    let a' = evalNoMu a
+    in case evalNoMu f of
+      Lam _ _ b -> evalNoMu (substVar b a' 0)
       f            -> App f a'
-  Mu n t    -> Mu n (eval t)
-  Slf n t   -> Slf n (eval t)
-  _         -> term
-
-contractibleSubst :: Term -> Int -> Bool
-contractibleSubst t n = case t of
-  Var i     -> i /= n
-  Mu _ t    -> contractibleSubst t (n + 1)
-  Lam _ _ _ -> False
-  App _ _   -> False
-  _         -> True
-
--- The Lam and App cases could potentially be, instead
---  Lam _ t b -> contractibleSubst t n || contractibleSubst b (n + 1)
---  App f a   -> contractibleSubst f n || contractibleSubst a n
--- However, a contractible term T would lose the useful property that if it is normalized, then T^n is also normalized,
--- for any power n, where T^n means substitute variable 0 in T by itself n times, that is,
--- `T^0 = Var 0` and `T^(n+1) = subst T^n T 0`. This means in particular that if T is contractible,
--- then `Mu "X" T` is normalized no matter how many times we unroll it.
-
-
--- Examples of substitutions which are not contractible when you consider evaluation of terms, which rule out `Lam` and `App` as guards for recursion
-notcontractible1 = Mu "X" (Lam "a" Typ (App (Rec 0) (Var 0)))
-notcontractible2 = Mu "X" (App (Lam "a" Typ (Var 0)) (Rec 0))
-
-isBohmRec :: Term -> Int -> Bool
-isBohmRec t n = case t of
-  Var i     -> i /= n
-  Mu _ t    -> isBohmRec t (n + 1)
-  _         -> True
-
-isBohm :: Term -> Bool
-isBohm t = case t of
-  App f a   -> isBohm f && isBohm a
-  Lam _ h b -> isBohm h && isBohm b
-  All _ h b -> isBohm h && isBohm b
-  Mu  _ t   -> isBohmRec t 0 && isBohm t
-  Slf _ t   -> isBohm t
-  _         -> True
-
-evalBohm :: Term -> Term
-evalBohm term = case term of
-  All n h b -> All n (evalBohm h) (evalBohm b)
-  Lam n h b -> Lam n (evalBohm h) (evalBohm b)
-  App f a   -> case (evalBohm f, evalBohm a) of
-    (Mu n t@(Lam _ _ _), Var i) -> App (Mu n t) (Var i)
-    (Mu n t@(Lam _ _ _), Rec i) -> App (Mu n t) (Rec i)
-    (Mu n t@(Lam _ _ _), a')    -> evalBohm $ App (substRec t (Mu n t) 0) a'
-    (Lam _ _ b, a')             -> evalBohm (substVar b a' 0)
-    (f', a')                    -> App f' a'
-  Mu n t    -> Mu n (evalBohm t)
-  Slf n t   -> Slf n (evalBohm t)
+  Mu n t    -> Mu n (evalNoMu t)
+  Slf n t   -> Slf n (evalNoMu t)
   _         -> term
 
 -- Equality algorithm
+freeUnboundVars :: Term -> Term
+freeUnboundVars t = go t 0 where
+  go t dep = case t of
+    Var i     -> if i < dep then Var i else Free (i - dep)
+    Lam n h b -> Lam n (go h dep) (go b (dep + 1))
+    All n h b -> All n (go h dep) (go b (dep + 1))
+    App f a   -> App (go f dep) (go a dep)
+    Slf n b   -> Slf n (go b (dep + 1))
+    Mu  n t   -> Mu  n (go t dep)
+    x         -> x
+
 equivalentTerms term1 term2 = do
   e <- equivalent term1 term2
   if e
@@ -234,24 +193,25 @@ equivalentTerms term1 term2 = do
 
 data Node a = Stop | Continue a | Branch a a
 
-sameNode :: Term -> Term -> Node (Term, Term)
-sameNode (App f a) (App f' a')     = Branch (headForm f, headForm f') (headForm a, headForm a')
-sameNode (Lam _ h b) (Lam _ h' b') = Branch (headForm h, headForm h') (headForm b, headForm b')
-sameNode (All _ h b) (All _ h' b') = Branch (headForm h, headForm h') (headForm b, headForm b')
-sameNode (Slf _ t) (Slf _ t')      = Continue (headForm t, headForm t')
-sameNode _ _                       = Stop
+sameNode :: Term -> Term -> Path -> Node (Term, Term, Path)
+sameNode (App f a) (App f' a')     ps = Branch (headFormPlus f, headFormPlus f', ps :|> Lft) (headFormPlus a, headFormPlus a', ps :|> Rgt)
+sameNode (Lam _ h b) (Lam _ h' b') ps = Branch (headFormPlus h, headFormPlus h', ps :|> Lft) (headFormPlus $ substVar b (Bound ps) 0, headFormPlus $ substVar b' (Bound ps) 0, ps :|> BRgt)
+sameNode (All _ h b) (All _ h' b') ps = Branch (headFormPlus h, headFormPlus h', ps :|> Lft) (headFormPlus $ substVar b (Bound ps) 0, headFormPlus $ substVar b' (Bound ps) 0, ps :|> BRgt)
+sameNode (Slf _ t) (Slf _ t')      ps = Continue (headFormPlus $ substVar t (Bound ps) 0, headFormPlus $ substVar t' (Bound ps) 0, ps :|> BCtr)
+sameNode _ _                       ps = Stop
 
 equal :: Term -> Term -> Bool
-equal term1 term2 = runEquivM' $ go [(headForm term1, headForm term2)] where
+equal term1 term2 = runEquivM' $ go [(headFormPlus $ freeUnboundVars term1, headFormPlus $ freeUnboundVars term2, Empty)] where
   go [] = return True
-  go ((term1, term2) : pairs) = do
+  go ((term1, term2, ps) : tris) = do
     b <- equivalentTerms term1 term2
+    equate term1 term2
     if b
-      then go pairs
+      then go tris
       else
-      case sameNode term1 term2 of
-        Branch pair1 pair2 -> equate term1 term2 >> go (pair1 : pair2 : pairs)
-        Continue pair -> equate term1 term2 >> go (pair : pairs)
+      case sameNode term1 term2 ps of
+        Branch tri1 tri2 -> go (tri1 : tri2 : tris)
+        Continue tri -> go (tri : tris)
         Stop -> return False
 
 ---- Examples
@@ -287,6 +247,10 @@ typeF2     = App typeF0 ten
 regularType1  = Mu "" $ impl Any $ impl Any (Rec 0)
 regularType2 = impl Any $ Mu "" $ impl Any $ impl Any (Rec 0)
 
+-- neither can it prove that `regularType4` is equivalent to `regularType3` after reduction
+regularType3 = Lam "A" Typ $ Mu "X" $ impl (Var 0) (Rec 0)
+regularType4 = Mu "X" $ Lam "A" Typ $ impl (Var 0) (App (Rec 0) (Var 0))
+
 -- The algorithm also works on irregular terms
 someFunc    = Lam "n" Any $ App (App (Var 0) zero) (Lam "pred" Any (Var 1))
 someTypeF   = Mu  "X" $ Lam "A" Any $ Lam "n" Any $ impl (App (Var 1) (App someFunc (Var 0))) $ App (App (Rec 0) (Var 1)) (App suc (Var 0))
@@ -296,3 +260,4 @@ someType2  = Lam "A" Any $ impl (App (Var 0) zero) $ impl (App (Var 0) one) $ im
 -- the algorithm is quickly able to check that the following is not equal to either of the last two terms, while in the JS version it takes a couple of seconds
 someType3 = Lam "" Any $ impl (App (Var 0) zero) $ impl (App (Var 0) one) $ impl (App (Var 0) two) $ impl (App (Var 0) three) $ App (App someTypeF (Var 0)) three
 notEq = equal someType1 someType3
+

@@ -55,6 +55,17 @@ unroll' term' = case term' of
   _          -> term'
 
 -- Encoding of second order terms into first order terms
+maxFreeVar :: Term -> Int
+maxFreeVar term = go term 0 where
+  go term n = case term of
+    Var i        -> if i < n then 0 else i-n
+    All _ h b    -> go h n `max` go b (n + 1)
+    Lam _ h b    -> go h n `max` go b (n + 1)
+    App f a      -> go f n `max` go a n
+    Slf _ t      -> go t (n + 1)
+    Mu _ t       -> go t n
+    _            -> 0
+
 encode :: Term -> Term'
 encode term = go term (\x -> x)
   where
