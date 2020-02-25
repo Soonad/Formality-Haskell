@@ -128,14 +128,14 @@ check term = case term of
     h  <- newHole
     xT <- expect (Slf "_" h) x
     return (subst h x 0)
-  Num   -> return Typ
-  Val _ -> return Num
-  Op1 o a b -> expect Num b
-  Op2 o a b -> expect Num a >> expect Num b
-  Ite c t f -> do
-    cT <- expect Num c
-    tT <- check t
-    expect tT f
+  --Num   -> return Typ
+  --Val _ -> return Num
+  --Op1 o a b -> expect Num b
+  --Op2 o a b -> expect Num a >> expect Num b
+  --Ite c t f -> do
+  --  cT <- expect Num c
+  --  tT <- check t
+  --  expect tT f
   -- Logs in Writer monad
   Log m x -> do
     mT  <- check m

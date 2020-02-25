@@ -19,6 +19,7 @@ library
                      Check
                      Pretty
                      Unify
+                     IEEE754
 --                     Equality
                      --SimplerCore
   build-depends:
@@ -31,6 +32,9 @@ library
     , vector
     , logict
     , equivalence
+    , cereal
+    , bytestring
+    , ieee754
   default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
 
 --executable fide
@@ -71,6 +75,9 @@ test-suite test
     , vector
     , crackNum
     , mtl
+    , ieee754
+    , cereal
+    , bytestring
   default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
   other-modules: Runtime.Net
                 , Spec.Lang
@@ -81,4 +88,5 @@ test-suite test
                 , Lang
                 , Check
                 , Pretty
+                , IEEE754
 

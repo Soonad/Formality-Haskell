@@ -7,10 +7,18 @@ import qualified Data.Set               as Set
 import           Data.Text              (Text)
 import qualified Data.Text              as T
 
+import qualified Data.ByteString        as B
+import           Data.Word
+import           Data.Bits              ((.&.), (.|.), xor, complement)
+import qualified Data.Bits              as Bits
+
 import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.RWS.Lazy hiding (All)
 import           Control.Monad.State
+
+import IEEE754
+import Numeric.IEEE
 
 type Name = Text
 
@@ -28,9 +36,10 @@ data Term
   | Slf Name Term              -- Self-type
   | New Term Term              -- Self-type introduction
   | Use Term                   -- Self-type elimination
-  | Num                        -- Number type
-  | Val Int                    -- Number Value
-  | Op1 Op Int Term            -- Unary operation (curried)
+  | F64                        -- Floating point number type
+  | I64                        -- Integer number type
+  | Val Word64                 -- Number Value
+  | Op1 Op Word64 Term         -- Unary operation (curried)
   | Op2 Op Term Term           -- Binary operation
   | Ite Term Term Term         -- If-then-else
   | Ann Term Term              -- Type annotation
@@ -46,30 +55,32 @@ data Module = Module
 emptyModule :: Module
 emptyModule = Module M.empty
 
-data Op = ADD | SUB | MUL | DIV | MOD | EQL
--- | POW | AND | BOR | XOR | NOT | SHR | SHL | GTH | LTH | EQL
+data Op
+  = ADD  | SUB  | MUL  | DIV  | MOD  | EQL  | GTH  | LTH
+  | AND  | BOR  | XOR  | NOT  | SHR  | SHL  | ROR  | ROL
+  | POW  | CLZ  | CTZ  | CNT  | FPOW | FSQT | FTRC | FCNV
+  | FADD | FSUB | FMUL | FDIV | FMOD | FEQL | FLTH | FGTH
+  | FNEZ | FCPY | FMIN | FMAX | FFLR | FCEL | FNST | FEXP
+  | FLOG | FSIN | FCOS | FTAN | FASN | FACS | FATN | FSNH
+  | FCSH | FTNH | FASH | FACH | FATH | FNAN | FINF
   deriving (Eq, Show, Ord)
 
 -- shift DeBruijn indices in term by an increment at/greater than a depth
 shift :: Term -> Int -> Int -> Term
 shift term inc dep = let go x = shift x inc dep in case term of
   Var i        -> Var (if i < dep then i else (i + inc))
-  Typ          -> Typ
   All n h e b  -> All n (go h) e (shift b inc (dep + 1))
   Lam n h e b  -> Lam n (go h) e (shift b inc (dep + 1))
   App f a e    -> App (go f) (go a) e
   Slf n t      -> Slf n (shift t inc (dep + 1))
   New t x      -> New (go t) (go x)
   Use x        -> Use (go x)
-  Num          -> Num
-  Val n        -> Val n
   Op1 o a b    -> Op1 o a (go b)
   Op2 o a b    -> Op2 o (go a) (go b)
   Ite c t f    -> Ite (go c) (go t) (go f)
   Ann t x      -> Ann (go t) (go x)
   Log m x      -> Log (go m) (go x)
-  Hol n        -> Hol n
-  Ref n        -> Ref n
+  x            -> x
 
 -- substitute a value for an index at a certain depth
 subst :: Term -> Term -> Int -> Term
@@ -79,22 +90,18 @@ subst term v dep =
   in
   case term of
   Var i       -> if i == dep then v else Var (i - if i > dep then 1 else 0)
-  Typ         -> Typ
   All n h e b -> All n (go h) e (subst b v' (dep + 1))
   Lam n h e b -> Lam n (go h) e (subst b v' (dep + 1))
   App f a e   -> App (go f) (go a) e
   Slf n t     -> Slf n (subst t v' (dep + 1))
   New t x     -> New (go t) (go x)
   Use x       -> Use (go x)
-  Num         -> Num
-  Val n       -> Val n
   Op1 o a b   -> Op1 o a (go b)
   Op2 o a b   -> Op2 o (go a) (go b)
   Ite c t f   -> Ite (go c) (go t) (go f)
   Ann t x     -> Ann (go t) (go x)
   Log m x     -> Log (go m) (go x)
-  Hol n       -> Hol n
-  Ref n       -> Ref n
+  x           -> x
 
 substMany :: Term -> [Term] -> Int -> Term
 substMany t vals d = go t vals d 0
@@ -118,15 +125,15 @@ eval term mod = go term
       Lam n h e b  -> go (subst b a 0)
       f            -> App f (go a) e
     New t x      -> go x
-    Use x        -> go x 
-    Op1 o a b    -> case go b  of
+    Use x        -> go x
+    Op1 o a b    -> case go b of
       Val n -> Val $ op o a n
       x     -> Op1 o a x
-    Op2 o a b   -> case go a  of
+    Op2 o a b   -> case go a of
       Val n -> go (Op1 o n b)
       x     -> Op2 o x b
     Ite c t f   -> case go c  of
-      Val n -> if n > 0 then go t  else go f
+      Val n -> if n > 0 then go t else go f
       x     -> Ite x t f
     Ann t x     -> go x 
     Log m x     -> Log (go m) (go x)
@@ -136,15 +143,62 @@ eval term mod = go term
       x          -> go x
     _           -> t
 
-op :: Op -> Int -> Int -> Int
+op :: Op -> Word64 -> Word64 -> Word64
 op o a b = case o of
-  ADD -> a + b
-  SUB -> a - b
-  MUL -> a * b
-  DIV -> a `div` b
-  MOD -> a `mod` b
-  EQL -> if a == b then 1 else 0
-  --POW -> a ^ b
+  ADD  -> a + b
+  SUB  -> a - b
+  MUL  -> a * b
+  DIV  -> a `div` b
+  MOD  -> a `mod` b
+  EQL  -> if a == b then 1 else 0
+  POW  -> a ^ b
+  AND  -> a .&. b
+  BOR  -> a .|. b
+  XOR  -> a `xor` b
+  NOT  -> complement b
+  SHR  -> Bits.shiftR b (fromIntegral a)
+  SHL  -> Bits.shiftL b (fromIntegral a)
+  ROR  -> Bits.rotateR b (fromIntegral a)
+  ROL  -> Bits.rotateL b (fromIntegral a)
+  GTH  -> if a > b then 1 else 0
+  LTH  -> if a < b then 1 else 0
+  CLZ  -> fromIntegral $ Bits.countLeadingZeros b
+  CTZ  -> fromIntegral $ Bits.countTrailingZeros b
+  CNT  -> fromIntegral $ Bits.popCount b
+  FADD -> ftou $ (utof a) + (utof b)
+  FSUB -> ftou $ (utof a) - (utof b)
+  FMUL -> ftou $ (utof a) * (utof b)
+  FDIV -> ftou $ (utof a) / (utof b)
+  FSQT -> ftou $ sqrt (utof b)
+  FEQL -> if (utof a) == (utof b) then 1 else 0
+  FNAN -> if isNaN (utof b) then 1 else 0
+  FINF -> if isInfinite (utof b) then 1 else 0
+  FNEZ -> if isNegativeZero (utof b) then 1 else 0
+  FLTH -> if (utof a) < (utof b) then 1 else 0
+  FGTH -> if (utof a) > (utof b) then 1 else 0
+  FMIN -> ftou $ minNaN (utof a) (utof b)
+  FMAX -> ftou $ maxNaN (utof a) (utof b)
+  FCPY -> ftou $ copySign (utof a) (utof b)
+  FPOW -> ftou $ (utof a) ** (utof b)
+  FEXP -> ftou $ exp (utof b)
+  FLOG -> ftou $ log (utof b)
+  FSIN -> ftou $ sin (utof b)
+  FCOS -> ftou $ cos (utof b)
+  FTAN -> ftou $ tan (utof b)
+  FASN -> ftou $ asin (utof b)
+  FACS -> ftou $ acos (utof b)
+  FATN -> ftou $ atan (utof b)
+  FSNH -> ftou $ sinh (utof b)
+  FCSH -> ftou $ cosh (utof b)
+  FTNH -> ftou $ tanh (utof b)
+  FASH -> ftou $ asinh (utof b)
+  FACH -> ftou $ acosh (utof b)
+  FATH -> ftou $ atanh (utof b)
+  FNST -> ftou $ fromIntegral $ round $ utof b
+  FCEL -> ftou $ fromIntegral $ ceiling $ utof b
+  FFLR -> ftou $ fromIntegral $ floor $ utof b
+  FTRC -> truncate $ utof b
+  FCNV -> ftou $ fromIntegral $ b
 
 erase :: Term -> Term
 erase term = case term of
@@ -162,3 +216,5 @@ erase term = case term of
   Ann t x        -> erase x
   Log m x        -> Log (erase m) (erase x)
   _              -> term
+
+

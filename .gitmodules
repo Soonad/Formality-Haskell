@@ -1,0 +1,3 @@
+[submodule "Base.fm"]
+	path = Base.fm
+	url = git@github.com:moonad/Base.fm.git

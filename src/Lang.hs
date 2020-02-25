@@ -11,6 +11,7 @@ import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
+import qualified Data.Text.IO               as TIO
 import           Data.Void
 
 import           Control.Monad              (void)
@@ -26,6 +27,9 @@ import           Core                       (Eras (..), Name, Op (..))
 import qualified Core                       as Core
 import           Pretty
 
+import qualified Data.ByteString as BS
+import Data.ByteString (ByteString)
+
 -- Lang.Term, this includes syntax sugars like `Let`
 data Term
   = Var Int                      -- Variable
@@ -39,7 +43,7 @@ data Term
   | Let (Map Name Term) Term     -- Recursive locally scoped definition
   | Whn [(Term, Term)] Term      -- When-statement
   | Swt Term [(Term,Term)] Term  -- Switch-statement
-  | Cse Term [(Name, Term)] Term -- Case-statement
+  | Cse Term [Term] [(Name, Term)] (Maybe Term) -- Case-statement
   | Rwt Term Term Term           -- Rewrite
   | Num                          -- Number type
   | Val Int                      -- Number Value
@@ -49,6 +53,11 @@ data Term
   | Log Term Term                -- inline log
   | Hol Name                     -- type hole or metavariable
   | Ref Name Int                 -- reference to a definition
+  | Bits ByteString
+  | IBits ByteString
+  | String Text
+  | Nat Int
+  | Pair Term Term
   deriving (Eq, Show, Ord)
 
 data Def
@@ -62,33 +71,36 @@ type Param = (Name,Term)
 type Index = (Name,Term)
 data Ctor = Ctor Name [Param] (Maybe Term) deriving (Eq, Show, Ord)
 
-data Module = Module [Def]
-
 -- binders can bind variables (deBruijn) or references
 data Binder = VarB Name | RefB Name deriving (Eq, Show)
 
 data ParseState = ParseState
-  { _holeCount    :: Int     -- for generating unique metavariable names
+  { _holeCount    :: Int      -- for generating unique metavariable names
+  , _names        :: Set Name -- top level names
   } deriving Show
 
 data ParseEnv = ParseEnv
   { _binders :: [Binder] -- binding contexts from lets, lambdas or foralls
-  , _block   :: Set Name -- to error on duplicate definitions in same block
+  , _block   :: Set Name -- set of names in local `let` block
   } deriving Show
+
+-- add top 
+names :: [Name] -> Parser ()
+names ns = modify (\s -> s {_names = Set.union (Set.fromList ns) (_names s)})
 
 -- add a list of binders to the context
 binders :: [Binder] -> Parser a -> Parser a
 binders bs p = local (\e -> e { _binders = (reverse bs) ++ _binders e }) p
 
--- add a name to current mutual recursion block
-block :: Name -> Parser a -> Parser a
-block n p = local (\e -> e { _block = Set.insert n (_block e)}) p
+-- add names to current mutual recursion block
+block :: [Name] -> Parser a -> Parser a
+block n p = local (\e -> e { _block = Set.union (Set.fromList n) (_block e)}) p
 
 -- a parser is a Reader-Writer-State monad transformer wrapped over a ParsecT
 -- TODO : Custom error messages
 type Parser = RWST ParseEnv () ParseState (ParsecT Void Text Identity)
 
-initParseState = ParseState 0
+initParseState = ParseState 0 Set.empty
 initParseEnv   = ParseEnv [] Set.empty
 
 -- top level parser with default env and state
@@ -102,6 +114,11 @@ parseDefault p s =
 -- a useful testing function
 parserTest :: Show a => Parser a -> Text -> IO ()
 parserTest p s = print $ parseDefault p s
+
+fileTest :: Show a => Parser a -> FilePath -> IO ()
+fileTest p f = do
+  txt <- TIO.readFile f
+  print $ parseDefault p txt
 
 -- evals the term directly
 --evalTest :: Parser Term -> Text -> IO ()
@@ -131,9 +148,9 @@ name = do
   if nam `elem` reservedWords then fail "reservedWord" else return nam
   where
     nameSymbol :: [Char]
-    nameSymbol = "_.#-@/'"
+    nameSymbol = "_.-@/'"
     reservedWords :: [Text]
-    reservedWords = ["let", "rewrite", "T"]
+    reservedWords = ["let", "rewrite", "T", "case", "with"]
 
 -- resolves if a name is a variable or reference
 refVar :: Parser Term
@@ -250,9 +267,9 @@ log = do sym "log("; msge <- term <* sc; sym ")"; Log msge <$> term
 -- if-then-else
 ite :: Parser Term
 ite = do
-  c <- sym "if"   >> term <* sc
-  t <- sym "then" >> term <* sc
-  f <- sym "else" >> term <* sc
+  c <- sym "if"   >> group' <* sc
+  t <- sym "then" >> group' <* sc
+  f <- sym "else" >> group' <* sc
   return $ Ite c t f
 
 -- a programmer defined hole
@@ -276,6 +293,9 @@ term = do
       , try $ val
       , try $ refVar
       , try $ group
+      , try $ case_
+      --, try $ when_
+      --, try $ switch_
       ]
   choice
     [ try $ fun t
@@ -325,40 +345,83 @@ opr :: Term -> Parser Term
 opr x = do
   sc
   op <- opName <|> sym "::"
+  when (op `elem` reservedSymbols) (fail "reservedWord")
   sc
   y <- term
   case op of
-    "::" -> return $ Ann y x
-    "->" -> return $ All "_" x Keep y
-    "+"  -> return $ Opr ADD x y
-    "-"  -> return $ Opr SUB x y
-    "*"  -> return $ Opr MUL x y
-    "==" -> return $ Opr EQL x y
-    f    -> return $ App (App (Ref f 0) x Keep) y Keep
+    "::"  -> return $ Ann y x
+    "->"  -> return $ All "_" x Keep y
+    "+"   -> return $ Opr ADD x y
+    "-"   -> return $ Opr SUB x y
+    "*"   -> return $ Opr MUL x y
+    "\\"  -> return $ Opr GTH x y
+    "%"   -> return $ Opr MOD x y
+    "**"  -> return $ Opr POW x y
+    "&&"  -> return $ Opr AND x y
+    "||"  -> return $ Opr BOR x y
+    "^"   -> return $ Opr XOR x y
+    "~"   -> return $ Opr NOT x y
+    ">"   -> return $ Opr GTH x y
+    "<"   -> return $ Opr LTH x y
+    ">>>" -> return $ Opr SHR x y
+    "<<"  -> return $ Opr SHL x y
+    "===" -> return $ Opr EQL x y
+    f     -> return $ App (App (Ref f 0) x Keep) y Keep
+  where
+    reservedSymbols = ["|", "=>"]
+
+case_ :: Parser Term
+case_ = do
+  lit "case"
+  sc
+  match <- term
+  sc
+  as    <- try $ optional (sym "as" >> name <* sc)
+  withs <- try $ many with
+  cases <- try $ many c
+  type_ <- case cases of
+              [] -> Just <$> (sym ":" >> term)
+              _  -> optional (sym ":" >> term)
+  return $ Cse match withs cases type_
+
+  where
+    with :: Parser Term
+    with = sym "with" >> term <* sc
+
+    c :: Parser (Name, Term)
+    c = do
+      sym "|"
+      --ls <- gets _names
+      n <- name <* sc
+      sym "=>"
+      t <- term
+      sc
+      return (n,t)
 
 def :: Parser Def
 def = choice
   [ try $ expr
---  , try $ enum
+  , try $ enum
   , try $ data_
---  , try $ import_
+  , try $ import_
   ]
 
 expr :: Parser Def
 expr = do
-  (n,t) <- expr'
+  (n,t) <- expr' (optional $ sym ";")
   return $ Expr n t
 
-expr' :: Parser (Name, Term)
-expr' = do
+expr' :: Parser a -> Parser (Name, Term)
+expr' x = do
   n  <- name
   ls <- asks _block
-  when (Set.member n ls) (fail "attempted to redefine a name")
+  ds <- gets _names
+  when (Set.member n ls || Set.member n ds) (fail "attempted to redefine a name")
   bs <- (optional $ binds True "(" ")")
   sc
   let ns = maybe [] (fmap (\(a,b,c) -> VarB a)) bs
   t  <- optional (sym ":" >> binders ns term <* sc)
-  optional (sym "=")
+  x
   d  <- binders ns term
   let x = case (bs, t) of
        (Nothing, Nothing) -> d
@@ -372,12 +435,22 @@ expr' = do
 enum :: Parser Def
 enum = do
   sym "enum"
-  Enum <$> some (sym "|" >> name)
+  Enum <$> some e 
+  where
+    e = do
+      sym "|"
+      ls <- gets _names
+      n <- name
+      when (Set.member n ls) (fail "attempted to redefine a name")
+      sc
+      return n
 
 data_ :: Parser Def
 data_ = do
   sym "T"
+  ls <- gets _names
   n <- name
+  when (Set.member n ls) (fail "attempted to redefine a name")
   ps <- optional' $ binds False "{" "}"
   sc
   is <- optional' $ binders ((\(x,y,z) -> VarB x) <$> ps) (binds False "(" ")")
@@ -398,13 +471,19 @@ data_ = do
     ix <- optional (sym ":" >> binders ((\(x,y,z) -> VarB x) <$> ps) term <* sc)
     return $ Ctor n (f <$> ps) ix
 
---import_ :: Parser Def
---import_ = undefined
+import_ :: Parser Def
+import_ = do
+  sym "import"
+  n <- name
+  h <- maybe "" id <$> optional (sym "#" >> some (satisfy isFileID))
+  return $ Impt n (T.pack h)
+  where
+    isFileID x = elem x (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
 
 let_ :: Parser Term
 let_ = do
   sym "let"
-  ds <- (sym "(" >> lets) <|> (pure <$> (expr' <* sepr))
+  ds <- (sym "(" >> lets) <|> (pure <$> (expr' (sym "=") <* sepr))
   t <- binders ((\(a, b) -> RefB a) <$> ds) $ group'
   return $ Let (M.fromList ds) t
   where
@@ -414,29 +493,36 @@ let_ = do
     next :: Parser [(Name, Term)]
     next = do
      ls    <- asks _block
-     (n,t) <- expr' <* sepr
+     (n,t) <- expr' (sym "=") <* sepr
      when (Set.member n ls) (fail "attempted to redefine a name")
-     ns <- block n $ lets
+     ns <- block [n] $ lets
      return $ (n,t) : ns
 
 
     sepr :: Parser (Maybe Text)
     sepr = sc >> optional (sym ";" <|> sym ",")
 
---module_ :: Parser (M.Map Name Term)
---module_ = sc >> M.fromList <$> defs
---  where
---    defs :: Parser [(Name, Term)]
---    defs = (sepr >> eof >> return []) <|> next
---
---    next :: Parser [(Name, Term)]
---    next = do
---     ls    <- asks _block
---     (n,t) <- def <* sepr
---     when (Set.member n ls) (fail "attempted to redefine a name")
---     ns <- block n $ defs
---     return $ (n,t) : ns
---
---    sepr :: Parser (Maybe Text)
---    sepr = sc >> optional (sym ";" <|> sym ",")
+module_ :: Parser [Def]
+module_ = sc >> defs
+  where
+    defs :: Parser [Def]
+    defs = (sc >> eof >> return []) <|> next
+
+    next :: Parser [Def]
+    next = do
+     d  <- def <* sc
+     case d of
+         Expr n t -> do
+           ds <- defs
+           return $ d : ds
+         Enum ns -> do
+           ds <- defs
+           return $ d : ds
+         Data n _ _ cs -> do
+           let cns = (\(Ctor n _ _) -> n) <$> cs
+           ds <- defs
+           return $ d : ds
+         Impt _ _ -> do
+           ds <- defs
+           return $ d : ds
 

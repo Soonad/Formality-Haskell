@@ -222,25 +222,23 @@ spec = do
 
   describe "Def" $ do
     it "bare-style definitions: \"a 1\"" $ do
-      parse' expr' "a 1" `shouldBe` (Just ("a",Val 1))
-    it "equals-style definitions: \"a = 1\"" $ do
-      parse' expr' "a = 1" `shouldBe` (Just ("a",Val 1))
+      parse' expr "a 1" `shouldBe` (Just $ Expr "a" (Val 1))
+    it "semicolon-style definitions: \"a; 1\"" $ do
+      parse' expr "a; 1" `shouldBe` (Just $ Expr "a" (Val 1))
     it "definitions with arguments: \"a(x) 1\"" $ do
-      parse' expr' "a(x) 1" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Val 1)))
+      parse' expr "a(x) 1" `shouldBe` (Just $ Expr "a" (Lam "x" (Hol "#0") Keep (Val 1)))
     it "definitions with arguments: \"a(x) x\"" $ do
-      parse' expr' "a(x) x" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Var 0)))
-    it "equals-style definitions with arguments: \"a(x) = 1\"" $ do
-      parse' expr' "a(x) = 1" `shouldBe` (Just ("a",Lam "x" (Hol "#0") Keep (Val 1)))
+      parse' expr "a(x) x" `shouldBe` (Just $ Expr "a" (Lam "x" (Hol "#0") Keep (Var 0)))
+    it "definitions with arguments (semicolon): \"a(x); 1\"" $ do
+      parse' expr "a(x); 1" `shouldBe` (Just $ Expr "a"(Lam "x" (Hol "#0") Keep (Val 1)))
     it "definitions with types: \"a : Number 1\"" $ do
-      parse' expr' "a : Number 1" `shouldBe` (Just ("a",Ann Num (Val 1)))
-    it "definitions with types: \"a : Number = 1\"" $ do
-      parse' expr' "a : Number = 1" `shouldBe` (Just ("a",Ann Num (Val 1)))
-    it "definitions with arguments and types: \"a(A : Type, x : A) : A = x\"" $ do
-      parse' expr' "a(A : Type, x : A) : A = x" `shouldBe`
-        Just ("a"
-        , Ann (All "A" Typ Keep (All "x" (Var 0) Keep (Var 1)))
-              (Lam "A" Typ Keep (Lam "x" (Var 0) Keep (Var 0)))
-        )
+      parse' expr "a : Number 1" `shouldBe` (Just $ Expr "a" (Ann Num (Val 1)))
+    it "definitions with types (semicolon): \"a : Number; 1\"" $ do
+      parse' expr "a : Number; 1" `shouldBe` (Just $ Expr "a" (Ann Num (Val 1)))
+    it "definitions with arguments and types: \"a(A : Type, x : A) : A; x\"" $ do
+      parse' expr "a(A : Type, x : A) : A; x" `shouldBe`
+        (Just $ Expr "a" (Ann (All "A" Typ Keep (All "x" (Var 0) Keep (Var 1)))
+                             (Lam "A" Typ Keep (Lam "x" (Var 0) Keep (Var 0)))))
 
   describe "ADT" $ do
     it "T Empty" $ do
@@ -254,4 +252,39 @@ spec = do
             Data "The" [("A", Hol "#0")] [("x", Var 0)] 
               [Ctor "the" [("x", Var 0)]
                 (Just (App (App (Ref "The" 0) (Var 1) Keep) (Var 0) Keep))])
+    it "T Either{A,B} | lft(value : A) | rgt(value : B)" $ do
+       parse' data_ "T Either{A,B} | lft(value : A) | rgt(value : B)" `shouldBe`
+         (Just $
+           Data "Either" [("A", Hol "#0"), ("B",Hol "#1")] []
+             [ Ctor "lft" [("value", Var 1)] Nothing
+             , Ctor "rgt" [("value", Var 0)] Nothing
+             ]
+         )
+
+  describe "Enum" $ do
+    it "enum | FOO | BAR" $ do
+      parse' enum "enum | FOO | BAR" `shouldBe` (Just $ Enum ["FOO", "BAR"])
+
+  describe "import" $ do
+    it "import Nat" $ do
+      parse' import_ "import Nat" `shouldBe` (Just $ Impt "Nat" "")
+
+  describe "case" $ do
+    it "Empty: case x : Number" $ do
+      parse' case_ "case x : Number" `shouldBe`
+        (Just $ Cse (Ref "x" 0) [] [] (Just Num))
+    it "Bool: case x | true => 1 | false => 0 : Number" $ do
+      parse' case_ "case x | true => 1 | false => 0 : Number" `shouldBe`
+        (Just $ Cse (Ref "x" 0) [] [("true", Val 1), ("false", Val 0)] (Just Num))
+    it "Bool: case x | true => 1 | false => 0" $ do
+      parse' case_ "case x | true => 1 | false => 0" `shouldBe`
+        (Just $ Cse (Ref "x" 0) [] [("true", Val 1), ("false", Val 0)] Nothing)
+    it "Bool: case x as y | true => 1 | false => 0" $ do
+      parse' case_ "case x as y| true => 1 | false => 0" `shouldBe`
+        (Just $ Cse (Ref "x" 0) [] [("true", Val 1), ("false", Val 0)] Nothing)
+    it "Bool: case x as y with z with w | true => 1 | false => 0" $ do
+      parse' case_ "case x as y with z with w | true => 1 | false => 0" `shouldBe`
+        (Just $ Cse (Ref "x" 0) [Ref "z" 0, Ref "w" 0] [("true", Val 1), ("false", Val 0)] Nothing)
+
+
 
