@@ -16,23 +16,6 @@ import           Control.Monad.State
 
 import           Core
 
-erase :: Term -> Term
-erase term = case term of
-  All n h e b    -> All n (erase h) e (erase b)
-  Lam n h Eras b -> erase $ subst b (Hol "#erased") 0
-  Lam n h e b    -> Lam n (erase h) e (erase b)
-  App f a Eras   -> erase f
-  App f a e      -> App (erase f) (erase a) e
-  Op1 o a b      -> Op1 o a (erase b)
-  Op2 o a b      -> Op2 o (erase a) (erase b)
-  Ite c t f      -> Ite (erase c) (erase t) (erase f)
-  Slf n t        -> Slf n (erase t)
-  New t x        -> erase x
-  Use x          -> erase x
-  Ann t x        -> erase x
-  Log m x        -> Log (erase m) (erase x)
-  _ -> term
-
 data CheckEnv = CheckEnv
   { _defs     :: Defs
   , _context  :: [Binder]

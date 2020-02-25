@@ -23,43 +23,56 @@ import           Check hiding (newHole, _context, binder)
 import           Core
 import           Pretty
 
---type Scope = M.Map Name Term
+-- track Holes (meta-variables) for unique names
+data ParseState = ParseState 
+  { _holeCount :: Int 
+  } deriving Show
 
-data ParseState = ParseState { _holeCount :: Int } deriving Show
-data ParseEnv = ParseEnv { _context :: [Name] } deriving Show
+-- track binding contexts from lambdas or foralls
+data ParseEnv = ParseEnv
+  { _context   :: [Name]
+  } deriving Show
 
+-- add a list of binders to the context
 binders :: [Name] -> Parser a -> Parser a
 binders ns p = local (\e -> e { _context = (reverse ns) ++ _context e }) p
 
+-- a parser is a Reader-Writer-State monad transformer wrapped over
+-- a ParsecT over Text
+-- TODO : Custom error messages
 type Parser = RWST ParseEnv () ParseState (ParsecT Void Text Identity)
 
---instance 
+-- top level parser with default env and state
+parseDefault :: Show a => Parser a -> Text
+             -> Identity
+                  (Either (ParseErrorBundle Text Void)
+                          (a, ParseState, ())
+                  )
+parseDefault p s = runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
 
+-- a useful testing function
 parserTest :: Show a => Parser a -> Text -> IO ()
 parserTest p s = print $ 
   runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
 
--- for `dbg`
---type Parser = ParsecT Void Text (State Ctx)
---
---parserTest :: Show a => Parser a -> Text -> IO ()
---parserTest p s = print $ runState (runParserT p "" s) (Ctx [] 0)
-
--- space consumer
-sc :: Parser ()
-sc = L.space space1 (L.skipLineComment "//") empty
-
-sym :: Text -> Parser Text
-sym t = L.symbol sc t
---
-lit :: Text -> Parser Text
-lit t = string t
-
+-- evals the term directly
 evalTest :: Parser Term -> Text -> IO ()
 evalTest p s = do
   let Identity (Right (a,st,w)) =
         runParserT (runRWST p (ParseEnv []) (ParseState 0)) "" s
   print $ eval a M.empty
+
+-- space consumer
+sc :: Parser ()
+sc = L.space space1 (L.skipLineComment "//") empty
+
+-- symbol followed by spaces
+sym :: Text -> Parser Text
+sym t = L.symbol sc t
+
+-- symbol not follws
+lit :: Text -> Parser Text
+lit t = string t
 
 name :: Parser Text
 name = do
@@ -71,6 +84,7 @@ name = do
     nameSymbol :: [Char]
     nameSymbol = "_.#-@/'"
 
+-- resolves if a name is a variable or reference
 refVar :: Parser Term
 refVar = do
   bs <- asks _context
@@ -79,15 +93,19 @@ refVar = do
     Just i -> return $ Var i
     _      -> return $ Ref n
 
+-- numeric type
 num :: Parser Term
 num = lit "Number" >> return Num
 
+-- numeric value
 val :: Parser Term
 val = Val <$> L.decimal
 
+-- The type "Type"
 typ :: Parser Term
 typ = lit "Type" >> return Typ
 
+-- forall or lambda
 allLam :: Parser Term
 allLam = do
   bs <- binds
@@ -97,6 +115,7 @@ allLam = do
   body <- binders ((\(x,y,z) -> x) <$> bs) expr
   return $ foldr (\(n,t,e) x -> ctor n t e x) body bs
 
+-- binders in a forall or lambda
 binds :: Parser [(Name, Term, Eras)]
 binds = sym "(" >> go
   where
@@ -124,12 +143,14 @@ binds = sym "(" >> go
           bT <- sym ":" >> term
           return ("_",bT)
 
+-- get a hole with a unique name
 newHole :: Parser Term
 newHole = do
   h <- gets _holeCount
   modify (\s -> s { _holeCount = (_holeCount s) + 1 })
   return $ Hol $ T.pack ("#" ++ show h)
 
+-- a term grouped by parenthesis
 group :: Parser Term
 group = do
   sym "("
@@ -137,6 +158,7 @@ group = do
   lit ")"
   return $ foldl1 (\x y -> App x y Keep) ts
 
+-- a self-type
 slf :: Parser Term
 slf = do
   sym "${"
@@ -145,15 +167,19 @@ slf = do
   t <- binders [n] term
   return $ Slf n t
 
+-- a self-type introduction
 new :: Parser Term
 new = do sym "new("; ty <- term <* sc; sym ")"; ex <- term; return $ New ty ex
 
+-- a self-type elimination
 use :: Parser Term
 use = do sym "use("; ex <- term <* sc; sym ")"; return $ Use ex;
 
+-- an inline typed log
 log :: Parser Term
 log = do sym "log("; msge <- term <* sc; sym ")"; Log msge <$> term
 
+-- if-then-else
 ite :: Parser Term
 ite = do
   c <- sym "if"   >> term <* sc
@@ -161,9 +187,11 @@ ite = do
   f <- sym "else" >> term <* sc
   return $ Ite c t f
 
+-- a programmer defined hole
 hol :: Parser Term
 hol = do n <- sym "?" >> name; return $ Hol n
 
+-- top level term
 term :: Parser Term
 term = do
   t <- choice
@@ -186,11 +214,13 @@ term = do
     , return t
     ]
 
+-- function style application
 fun :: Term -> Parser Term
 fun f = do
   as <- concat <$> some args
   return $ foldl (\t (a,e) -> App t a e) f as
 
+-- arguments to a function style application
 args :: Parser [(Term, Eras)]
 args = sym "(" >> go
   where
@@ -202,6 +232,7 @@ args = sym "(" >> go
         Just ";"  -> (do as <- go; return $ (a,Eras) : as)
         _         -> (do as <- go; return $ (a,Keep) : as)
 
+-- an operator name
 opName :: Parser Text
 opName = do
   n  <- satisfy (\x -> elem x opInitSymbol)
@@ -220,6 +251,7 @@ opName = do
     opSymbol :: [Char]
     opSymbol = "!#$%&*+./<=>?@/^|~-"
 
+-- binary symbolic operator
 opr :: Term -> Parser Term
 opr x = do
   sc
@@ -234,12 +266,13 @@ opr x = do
     "*"  -> return $ Op2 MUL x y
     f    -> return $ App (App (Ref f) x Keep) y Keep
 
+-- an expression with lambda-style applications
 expr :: Parser Term
 expr = do
   ts <- some term
   return $ foldl1 (\x y -> App x y Keep) ts
 
-
+-- a definition
 def :: Parser (Name, Term)
 def = do
   n  <- name
@@ -257,6 +290,7 @@ def = do
           trm = foldr (\(n,t,e) x -> Lam n t e x)  d bs
        in return $ (n, Ann typ trm)
 
+-- the text of a file
 file :: Parser (M.Map Name Term)
 file = do
   sc

@@ -6,7 +6,7 @@ import Control.Applicative (liftA2)
 import           Data.Equivalence.Monad
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Text.IO as I (putStrLn)
+import qualified Data.Text.IO as I (putStrLn)
 import           Data.Sequence (Seq(..))
 import qualified Data.Sequence as S
 
