@@ -1,18 +1,27 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Core where
 
-import qualified Data.Map.Strict as M
-import           Data.Text                  (Text)
-import qualified Data.Text                  as T
-
+import Control.Applicative (liftA2)
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Except
+
+import           Data.Equivalence.Monad
+import qualified Data.Map.Strict as M
+import           Data.Sequence (Seq(..))
+import qualified Data.Sequence as S
+
+import           Data.Text (Text)
+import qualified Data.Text as T
 
 type Name = Text
 data Eras = Eras  -- Erase from runtime
           | Keep  -- Keep at runtime
           -- | EHol Name  -- Erasure metavariable (probably not needed)
           deriving (Show, Eq, Ord)
+
+data Dir  = Lft | Rgt | Ctr deriving (Eq, Show, Ord)
+type Path = Seq Dir
 
 data Term
   = Var Int                    -- Variable
@@ -33,6 +42,8 @@ data Term
   | Hol Name                   -- type hole or metavariable
 --  | Let Name Term Term         -- locally scoped definition
   | Ref Name                   -- reference to a globally scoped definition
+  -- The following should only be used by the equality algorithm
+  | Bound Path
   deriving (Eq, Show, Ord)
 
 data Op
@@ -44,22 +55,18 @@ data Op
 shift :: Term -> Int -> Int -> Term
 shift term inc dep = case term of
   Var i        -> Var (if i < dep then i else (i + inc))
-  Typ          -> Typ
   All n h e b  -> All n (shift h inc dep) e (shift b inc (dep + 1))
   Lam n h e b  -> Lam n (shift h inc dep) e (shift b inc (dep + 1))
   App f a e    -> App (shift f inc dep) (shift a inc dep) e
   Slf n t      -> Slf n (shift t inc (dep + 1))
   New t x      -> New (shift t inc dep) (shift x inc dep)
   Use x        -> Use (shift x inc dep)
-  Num          -> Num
-  Val n        -> Val n
   Op1 o a b    -> Op1 o a (shift b inc dep)
   Op2 o a b    -> Op2 o (shift a inc dep) (shift b inc dep)
   Ite c t f    -> Ite (shift c inc dep) (shift t inc dep) (shift f inc dep)
   Ann t x      -> Ann (shift t inc dep) (shift x inc dep)
   Log m x      -> Log (shift m inc dep) (shift x inc dep)
-  Hol n        -> Hol n
-  Ref n        -> Ref n
+  _            -> term
 
 -- substitute a value for an index at a certain depth
 subst :: Term -> Term -> Int -> Term
@@ -67,22 +74,18 @@ subst term v dep =
   let v' = shift v 1 0 in
   case term of
   Var i       -> if i == dep then v else Var (i - if i > dep then 1 else 0)
-  Typ         -> Typ
   All n h e b -> All n (subst h v dep) e (subst b v' (dep + 1))
   Lam n h e b -> Lam n (subst h v dep) e (subst b v' (dep + 1))
   App f a e   -> App (subst f v dep) (subst a v dep) e
   Slf n t     -> Slf n (subst t v' (dep + 1))
   New t x     -> New (subst t v dep) (subst x v dep)
   Use x       -> Use (subst x v dep)
-  Num         -> Num
-  Val n       -> Val n
   Op1 o a b   -> Op1 o a (subst b v dep)
   Op2 o a b   -> Op2 o (subst a v dep) (subst b v dep)
   Ite c t f   -> Ite (subst c v dep) (subst t v dep) (subst f v dep)
   Ann t x     -> Ann (subst t v dep) (subst x v dep)
   Log m x     -> Log (subst m v dep) (subst x v dep)
-  Hol n       -> Hol n
-  Ref n       -> Ref n
+  _           -> term
 
 substMany :: Term -> [Term] -> Int -> Term
 substMany t vals d = go t vals d 0
@@ -91,13 +94,14 @@ substMany t vals d = go t vals d 0
     go t (v:vs) d i = go (subst t (shift v (l - i) 0) (d + l - i)) vs d (i + 1)
     go t [] d i = t
 
-type Defs = M.Map Text Term
+type Defs = M.Map Name Term
+
+dereference :: Name -> Defs -> Term
+dereference n defs = maybe (error ("Undefined reference " ++ T.unpack n)) (\x -> x) $ M.lookup n defs
 
 -- deBruijn
 eval :: Term -> Defs -> Term
 eval term defs = case term of
-  Var i       -> Var i
-  Typ         -> Typ
   All n h e b -> All n h e b
   Lam n h e b -> Lam n h e (eval b defs)
   App f a e   -> case eval f defs of
@@ -106,8 +110,6 @@ eval term defs = case term of
   Slf n t     -> Slf n t
   New t x     -> eval x defs
   Use x       -> eval x defs
-  Num         -> Num
-  Val n       -> Val n
   Op1 o a b    -> case eval b defs of
     Val n -> Val $ op o a n
     x     -> Op1 o a x
@@ -119,11 +121,8 @@ eval term defs = case term of
     x     -> Ite x (eval t defs) (eval f defs)
   Ann t x     -> eval x defs
   Log m x     -> Log (eval m defs) (eval x defs)
-  Hol n       -> Hol n
-  Ref n       -> dereference n defs
-
-dereference :: Name -> Defs -> Term
-dereference n defs = maybe (Ref n) (\x -> eval x defs) $ M.lookup n defs
+  Ref n       -> eval (dereference n defs) defs
+  _           -> term
 
 op :: Op -> Int -> Int -> Int
 op o a b = case o of
@@ -150,3 +149,84 @@ erase term = case term of
   Ann t x        -> erase x
   Log m x        -> Log (erase m) (erase x)
   _ -> term
+
+headForm :: Defs -> Term -> Term
+headForm defs term = case term of
+  App f a e -> case headForm defs f of
+               Lam _ _ _ b -> headForm defs (subst b a 0)
+               f     -> App f a e
+  Ref name  -> headForm defs (dereference name defs)
+  _         -> term
+
+data Node a = Stop | Branch1 a | Branch2 a a | Branch3 a a a deriving (Eq, Ord, Show)
+
+sameNode :: Term -> Term -> Path -> Node (Term, Term, Path)
+sameNode t1 t2 ps = case (t1, t2) of
+  (App f a _, App f' a' _) ->
+    Branch2 (f, f', ps :|> Lft) (a, a', ps :|> Rgt)
+  (Lam _ _ _ b, Lam _ _ _ b') ->
+    Branch1 (subst b (Bound ps) 0, subst b' (Bound ps) 0, ps :|> Rgt)
+  (All _ h _ b, All _ h' _ b') ->
+    Branch2 (h, h', ps :|> Lft) (subst b (Bound ps) 0, subst b' (Bound ps) 0, ps :|> Rgt)
+  (Slf _ b, Slf _ b') ->
+    Branch1 (subst b (Bound ps) 0, subst b' (Bound ps) 0, ps :|> Ctr)
+  (New _ b, New _ b') ->
+    Branch1 (b, b', ps :|> Rgt)
+  (Use b, Use b') ->
+    Branch1 (b, b', ps :|> Ctr)
+  (Op1 op i b, Op1 op' i' b') ->
+    if i /= i' || op /= op'
+    then Stop
+    else Branch1 (b, b', ps :|> Ctr)
+  (Op2 op a b, Op2 op' a' b') ->
+    if op /= op'
+    then Stop
+    else Branch2 (a, a', ps :|> Lft) (b, b', ps :|> Rgt)
+  (Ite b t f, Ite b' t' f') ->
+    Branch3 (b, b', ps :|> Lft) (t, t', ps :|> Ctr) (f, b', ps :|> Rgt)
+  (Ann _ b, Ann _ b') ->
+    Branch1 (b, b', ps :|> Rgt)
+  (Log _ b, Log _ b') ->
+    Branch1 (b, b', ps :|> Rgt)
+  _ ->
+    Stop
+
+equivalentTerms term1 term2 = do
+  e <- equivalent term1 term2
+  if e
+    then return True
+    else
+    case (term1, term2) of
+      (Lam _ _ _ b, Lam _ _ _ b')  -> equivalentTerms b b'
+      (App f a _, App f' a' _)     -> equivalentTerms f f' &&* equivalentTerms a a'
+      (All _ h _ b, All _ h' _ b') -> equivalentTerms h h' &&* equivalentTerms b b'
+      (Slf _ b, Slf _ b')          -> equivalentTerms b b'
+      (New _ b, New _ b')          -> equivalentTerms b b'
+      (Use b, Use b')              -> equivalentTerms b b'
+      (Op1 op i b, Op1 op' i' b')  -> pure (op == op') &&* (pure (i == i') &&* equivalentTerms b b')
+      (Op2 op a b, Op2 op' a' b')  -> pure (op == op') &&* (equivalentTerms a a' &&* equivalentTerms b b')
+      (Ite b t f, Ite b' t' f')    -> equivalentTerms b b' &&* (equivalentTerms t t' &&* equivalentTerms f f')
+      (Ann _ b, Ann _ b')          -> equivalentTerms b b'
+      (Log _ b, Log _ b')          -> equivalentTerms b b'
+      _                            -> return False
+  where
+    (&&*) = liftA2 (&&)
+
+equal :: Defs -> Term -> Term -> Bool
+equal defs term1 term2 = runEquivM' $ go (S.singleton (term1, term2, Empty)) where
+  go Empty = return True
+  go ((t1, t2, ps) :<| tris) = do
+    let term1 = headForm defs t1
+    let term2 = headForm defs t2
+    equate t1 term1
+    equate t2 term2
+    b <- equivalentTerms term1 term2
+    equate term1 term2
+    if b
+      then go tris
+      else
+      case sameNode term1 term2 ps of
+        Branch1 tri            -> go (tris :|> tri)
+        Branch2 tri1 tri2      -> go (tris :|> tri1 :|> tri2)
+        Branch3 tri1 tri2 tri3 -> go (tris :|> tri1 :|> tri2 :|> tri3)
+        Stop                   -> return False
