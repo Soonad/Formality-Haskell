@@ -15,13 +15,14 @@ library
   exposed-modules:   Runtime.Net
                      Core
                      Lang
+                     Parser
+                     Parser.PreModule
+                     Parser.Lang
+                     Parser.Types
                      CoreSyn
                      Check
                      Pretty
-                     Unify
                      IEEE754
---                     Equality
-                     --SimplerCore
   build-depends:
     base
     , containers
@@ -80,7 +81,10 @@ test-suite test
     , bytestring
   default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
   other-modules: Runtime.Net
-                , Spec.Lang
+                , Spec.Parser
+                , Spec.Parser.Lang
+                , Spec.Parser.PreModule
+                , Spec.Parser.Utils
                 , Spec.Net
 --                , Spec.Core
                 , Core
@@ -88,5 +92,9 @@ test-suite test
                 , Lang
                 , Check
                 , Pretty
+                , Parser
+                , Parser.PreModule
+                , Parser.Lang
+                , Parser.Types
                 , IEEE754
 
