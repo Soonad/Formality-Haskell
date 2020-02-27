@@ -23,19 +23,19 @@ spec :: SpecWith ()
 spec = do
   describe "Def" $ do
     it "bare-style definitions: \"a 1\"" $ do
-      parse' definition "a 1" `shouldBe` (Just $ Expr "a" (Val 1))
+      parse' definition "a 1" `shouldBe` (Just $ Expr "a" (U64 1))
     it "semicolon-style definitions: \"a; 1\"" $ do
-      parse' definition "a; 1" `shouldBe` (Just $ Expr "a" (Val 1))
+      parse' definition "a; 1" `shouldBe` (Just $ Expr "a" (U64 1))
     it "definitions with arguments: \"a(x) 1\"" $ do
-      parse' definition "a(x) 1" `shouldBe` (Just $ Expr "a" (Lam "x" (Hol "#0") Keep (Val 1)))
+      parse' definition "a(x) 1" `shouldBe` (Just $ Expr "a" (Lam "x" (Hol "#0") Keep (U64 1)))
     it "definitions with arguments: \"a(x) x\"" $ do
       parse' definition "a(x) x" `shouldBe` (Just $ Expr "a" (Lam "x" (Hol "#0") Keep (Var 0)))
     it "definitions with arguments (semicolon): \"a(x); 1\"" $ do
-      parse' definition "a(x); 1" `shouldBe` (Just $ Expr "a"(Lam "x" (Hol "#0") Keep (Val 1)))
-    it "definitions with types: \"a : Number 1\"" $ do
-      parse' definition "a : Number 1" `shouldBe` (Just $ Expr "a" (Ann Num (Val 1)))
-    it "definitions with types (semicolon): \"a : Number; 1\"" $ do
-      parse' definition "a : Number; 1" `shouldBe` (Just $ Expr "a" (Ann Num (Val 1)))
+      parse' definition "a(x); 1" `shouldBe` (Just $ Expr "a"(Lam "x" (Hol "#0") Keep (U64 1)))
+    it "definitions with types: \"a : Word 1\"" $ do
+      parse' definition "a : Word 1" `shouldBe` (Just $ Expr "a" (Ann Wrd (U64 1)))
+    it "definitions with types (semicolon): \"a : Word; 1\"" $ do
+      parse' definition "a : Word; 1" `shouldBe` (Just $ Expr "a" (Ann Wrd (U64 1)))
     it "definitions with arguments and types: \"a(A : Type, x : A) : A; x\"" $ do
       parse' definition "a(A : Type, x : A) : A; x" `shouldBe`
         (Just $ Expr "a" (Ann (All "A" Typ Keep (All "x" (Var 0) Keep (Var 1)))

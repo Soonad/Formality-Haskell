@@ -6,6 +6,7 @@ import           Text.Megaparsec            hiding (State)
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
+import           Data.Char
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import           Data.Set                   (Set)
@@ -22,7 +23,7 @@ import Parser.Types
 import Lang
 
 sc :: Parser ()
-sc = L.space space1 (L.skipLineComment "//") empty
+sc = L.space space1 (L.skipLineComment "//" <|> L.skipLineComment "--") empty
 
 -- symbol followed by spaces
 sym :: Text -> Parser Text
@@ -64,12 +65,36 @@ refVar = do
     go [] cs varIndex refCount n     = Ref n (cs + refCount)
 
 -- numeric type
-num :: Parser Term
-num = lit "Number" >> return Num
+dbl :: Parser Term
+dbl = lit "Double" >> return Dbl
 
--- numeric value
-val :: Parser Term
-val = Val <$> L.decimal
+wrd :: Parser Term
+wrd = lit "Word" >> return Wrd
+
+-- numeric U64 value
+u64 :: Parser Term
+u64 = do
+  v <- choice
+    [ lit "0x" >> L.hexadecimal
+    , lit "0o" >> L.octal
+    , lit "0b" >> L.binary
+    , L.decimal
+    ]
+  when ((v :: Integer) >= 2^64) (fail "word too big")
+  return $ U64 (fromIntegral v)
+
+bits :: Parser Term
+bits = do
+  v <- choice
+    [ lit "0x" >> L.hexadecimal
+    , lit "0o" >> L.octal
+    , lit "0b" >> L.binary
+    , L.decimal
+    ]
+  return $ Bit False v
+
+f64 :: Parser Term
+f64 = F64 <$> L.signed (pure ()) L.float
 
 -- The type "Type"
 typ :: Parser Term
@@ -95,8 +120,8 @@ binds erasable start end = sym start >> go
     next = do
       (b, bT) <- binderAndType
       e <- if erasable
-           then optional $ (sc >> sym ",") <|> (sc >> sym ";")
-           else optional (sc >> sym ",")
+           then optional $ (sym ",") <|> (sym ";")
+           else optional (sym ",")
       case e of
         Just ";" -> (do bs <- binders [VarB b] $ go; return $ (b,bT,Eras) : bs)
         _        -> (do bs <- binders [VarB b] $ go; return $ (b,bT,Keep) : bs)
@@ -107,12 +132,14 @@ binds erasable start end = sym start >> go
       case b of
         Just n -> do
           bT <- sc >> (optional $ sym ":" >> term)
+          sc
           case bT of
             Just x -> return (n,x)
             Nothing -> (\x -> (n,x)) <$> newHole
 
         Nothing -> do
           bT <- sym ":" >> term
+          sc
           return ("_",bT)
 
 -- get a hole with a unique name
@@ -176,24 +203,33 @@ term = do
       [ try $ allLam
       , try $ let_
       , try $ typ
-      , try $ num
+      , try $ dbl
+      , try $ wrd
+      , try $ str
+      , try $ chr_
+      , try $ lst
       , try $ slf
       , try $ new
       , try $ log
       , try $ use
       , try $ ite
       , try $ hol
-      , try $ val
+      , try $ f64
+      , try $ u64
       , try $ refVar
       , try $ group
-      , try $ case_
-      --, try $ when_
-      --, try $ switch_
+      , try $ cse
+      , try $ whn
+      , try $ swt
       ]
-  choice
+  t' <- choice
     [ try $ fun t
-    , try $ opr t
     , return t
+    ]
+  choice
+    [ try $ opr t'
+    , try $ ann t
+    , return t'
     ]
 
 -- function style application
@@ -207,12 +243,16 @@ args :: Parser [(Term, Eras)]
 args = sym "(" >> go
   where
     go   = (sc >> lit ")" >> return []) <|> next
-    next = do
-      a <- term <* sc
-      e <- optional $ (sc >> sym ",") <|> (sc >> sym ";")
-      case e of
-        Just ";"  -> (do as <- go; return $ (a,Eras) : as)
-        _         -> (do as <- go; return $ (a,Keep) : as)
+    next = do (a,e) <- holeArg <|> termArg; as <- go; return $ (a,e) : as
+    holeArg = sym "_" >> (\x -> (x,Eras)) <$> newHole
+    termArg = do
+      t <- term
+      e <- choice
+        [ sym "," >> return Keep
+        , sym ";" >> return Eras
+        , lookAhead (lit ")") >> return Keep
+        ]
+      return (t,e)
 
 -- an operator name
 opName :: Parser Text
@@ -220,34 +260,34 @@ opName = do
   n  <- satisfy (\x -> elem x opInitSymbol)
   case elem n opSingleSymbol of 
     True -> do
-      ns <- many (alphaNumChar <|> satisfy (\x -> elem x opSymbol))
+      ns <- many (satisfy (\x -> elem x opSymbol))
       return $ T.pack (n : ns)
     False -> do
-      ns <- some (alphaNumChar <|> satisfy (\x -> elem x opSymbol))
+      ns <- some (satisfy (\x -> elem x opSymbol))
       return $ T.pack (n : ns)
   where
     opInitSymbol :: [Char]
-    opInitSymbol = "!$%&*+./<=>/^|~-"
+    opInitSymbol = "!$%&*+./\\<=>^|~-"
     opSingleSymbol :: [Char]
-    opSingleSymbol = "!$%&*+./<>/^|~-"
+    opSingleSymbol = "!$%&*+./\\<>^|~-"
     opSymbol :: [Char]
-    opSymbol = "!#$%&*+./<=>?@/^|~-"
+    opSymbol = "!#$%&*+./\\<=>?@^|~-"
 
 -- binary symbolic operator
 opr :: Term -> Parser Term
 opr x = do
   sc
-  op <- opName <|> sym "::"
+  op <- opName
   when (op `elem` reservedSymbols) (fail "reservedWord")
   sc
   y <- term
   case op of
-    "::"  -> return $ Ann y x
     "->"  -> return $ All "_" x Keep y
     "+"   -> return $ Opr ADD x y
     "-"   -> return $ Opr SUB x y
     "*"   -> return $ Opr MUL x y
-    "\\"  -> return $ Opr GTH x y
+    "\\" -> return $ Opr DIV x y
+    "/"   -> return $ Opr DIV x y
     "%"   -> return $ Opr MOD x y
     "**"  -> return $ Opr POW x y
     "&&"  -> return $ Opr AND x y
@@ -263,8 +303,24 @@ opr x = do
   where
     reservedSymbols = ["|", "=>"]
 
-case_ :: Parser Term
-case_ = do
+ann :: Term -> Parser Term
+ann x = do
+  sc
+  op <- sym "::"
+  y <- rewrite <|> term
+  return $ Ann y x
+  where
+    rewrite :: Parser Term
+    rewrite = do
+      sym "rewrite"
+      p <- term
+      sc
+      sym "with"
+      q <- term
+      return $ Rwt p q
+
+cse :: Parser Term
+cse = do
   lit "case"
   sc
   match <- term
@@ -277,8 +333,13 @@ case_ = do
               _  -> optional (sym ":" >> term)
   return $ Cse match withs cases type_
   where
-    with :: Parser Term
-    with = sym "with" >> term <* sc
+    with :: Parser (Term,Term)
+    with = do
+      sym "with" 
+      x <- term <* sc
+      t <- (sym ":" >> term <* sc) <|> newHole
+      return (x,t)
+
 
     c :: Parser (Name, Term)
     c = do
@@ -289,6 +350,30 @@ case_ = do
       t <- term
       sc
       return (n,t)
+
+whn :: Parser Term
+whn = do
+  sym "when" 
+  ws <- some w
+  sc
+  sym "else"
+  f <- term
+  return $ Whn ws f
+  where
+    w = do sym "|"; c <- term; sc; sym "=>"; t <- term; sc; return (c,t)
+
+swt :: Parser Term
+swt = do
+  sym "switch"
+  n <- term
+  sc
+  ws <- some w
+  sc
+  sym "else"
+  f <- term
+  return $ Swt n ws f
+  where
+    w = do sym "|"; c <- term; sc; sym "=>"; t <- term; sc; return (c,t)
 
 def :: Parser a -> Parser (Name, Term)
 def x = do
@@ -331,3 +416,93 @@ let_ = do
 
     sepr :: Parser (Maybe Text)
     sepr = sc >> optional (sym ";" <|> sym ",")
+
+str :: Parser Term
+str = do
+  char '"'
+  cs <- many (nonEscape <|> empty <|> (pure <$> escape))
+  char '"'
+  return $ Str (T.pack (concat cs))
+  where
+    nonEscape :: Parser [Char]
+    nonEscape = pure <$> noneOf ("\\\"" :: String)
+
+    empty :: Parser [Char]
+    empty = lit "\\&" >> return []
+
+chr_ :: Parser Term
+chr_ = do
+  char '\''
+  c <- nonEscape <|> escape
+  char '\''
+  return $ Chr c
+  where
+    nonEscape :: Parser Char
+    nonEscape = noneOf ("\\\'" :: String)
+
+escape :: Parser Char
+escape = do
+  d <- char '\\'
+  choice
+    [ lit "\\"  >> return '\\'
+    , lit "\""  >> return '"'
+    , lit "x"   >> chr <$> L.hexadecimal
+    , lit "o"   >> chr <$> L.octal
+    , lit "n"   >> return '\n'
+    , lit "r"   >> return '\r'
+    , lit "v"   >> return '\v'
+    , lit "b"   >> return '\b'
+    , lit "f"   >> return '\f'
+    , lit "ACK" >> return '\ACK'
+    , lit "BEL" >> return '\BEL'
+    , lit "BS"  >> return '\BS'
+    , lit "CR"  >> return '\CR'
+    , lit "DEL" >> return '\DEL'
+    , lit "DC1" >> return '\DC1'
+    , lit "DC2" >> return '\DC2'
+    , lit "DC3" >> return '\DC3'
+    , lit "DC4" >> return '\DC4'
+    , lit "DLE" >> return '\DLE'
+    , lit "ENQ" >> return '\ENQ'
+    , lit "EOT" >> return '\EOT'
+    , lit "ESC" >> return '\ESC'
+    , lit "ETX" >> return '\ETX'
+    , lit "ETB" >> return '\ETB'
+    , lit "EM"  >> return '\EM'
+    , lit "FS"  >> return '\FS'
+    , lit "FF"  >> return '\FF'
+    , lit "GS"  >> return '\GS'
+    , lit "HT"  >> return '\HT'
+    , lit "LF"  >> return '\LF'
+    , lit "NUL" >> return '\NUL'
+    , lit "NAK" >> return '\NAK'
+    , lit "RS"  >> return '\RS'
+    , lit "SOH" >> return '\SOH'
+    , lit "STX" >> return '\STX'
+    , lit "SUB" >> return '\SUB'
+    , lit "SYN" >> return '\SYN'
+    , lit "SI"  >> return '\SI'
+    , lit "SO"  >> return '\SO'
+    , lit "SP"  >> return '\SP'
+    , lit "US"  >> return '\US'
+    , lit "VT"  >> return '\VT'
+    , lit "^@"  >> return '\0'
+    , lit "^["  >> return '\ESC'
+    , lit "^\\" >> return '\FS'
+    , lit "^]"  >> return '\GS'
+    , lit "^^"  >> return '\RS'
+    , lit "^_"  >> return '\US'
+    , do lit "^"; c <- oneOf ['A'..'Z']; return (chr $ (ord c) - 64)
+    , chr <$> L.decimal
+    ]
+
+lst :: Parser Term
+lst = Lst <$> (sym "[" >> go)
+  where
+    go   = (sc >> lit "]" >> return []) <|> next
+    next = do 
+      a <- term <* sc
+      sym "," <|> lookAhead (lit "]")
+      as <- go
+      return $ a : as
+
