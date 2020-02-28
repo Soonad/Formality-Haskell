@@ -44,7 +44,7 @@ name = do
     nameSymbol :: [Char]
     nameSymbol = "_.-@/'"
     reservedWords :: [Text]
-    reservedWords = ["let", "rewrite", "T", "case", "with"]
+    reservedWords = ["let", "T", "case", "with"]
 
 -- resolves if a name is a variable or reference
 refVar :: Parser Term
@@ -106,8 +106,7 @@ allLam = do
   bs <- binds True "(" ")"
   sc
   ctor <- (sym "->" >> return All) <|> (sym "=>" >> return Lam)
-  sc
-  body <- binders ((\(x,y,z) -> VarB x) <$> bs) group'
+  body <- binders ((\(x,y,z) -> VarB x) <$> bs) term
   return $ foldr (\(n,t,e) x -> ctor n t e x) body bs
 
 -- binders in a forall or lambda
@@ -128,7 +127,7 @@ binds erasable start end = sym start >> go
 
     binderAndType :: Parser (Name, Term)
     binderAndType = do
-      b <- optional name
+      b <- optional $ (try $ lit "_") <|> name
       case b of
         Just n -> do
           bT <- sc >> (optional $ sym ":" >> term)
@@ -148,20 +147,6 @@ newHole = do
   h <- gets _holeCount
   modify (\s -> s { _holeCount = (_holeCount s) + 1 })
   return $ Hol $ T.pack ("#" ++ show h)
-
--- a term grouped by parenthesis
-group :: Parser Term
-group = do
-  sym "("
-  ts <- sc >> sepEndBy1 term sc
-  lit ")"
-  return $ foldl1 (\x y -> App x y Keep) ts
-
--- an term with lambda-style whitespace applications
-group' :: Parser Term
-group' = do
-  ts <- some term
-  return $ foldl1 (\x y -> App x y Keep) ts
 
 -- a self-type
 slf :: Parser Term
@@ -187,19 +172,33 @@ log = do sym "log("; msge <- term <* sc; sym ")"; Log msge <$> term
 -- if-then-else
 ite :: Parser Term
 ite = do
-  c <- sym "if"   >> group' <* sc
-  t <- sym "then" >> group' <* sc
-  f <- sym "else" >> group' <* sc
+  c <- sym "if"   >> term <* sc
+  t <- sym "then" >> term <* sc
+  f <- sym "else" >> term <* sc
   return $ Ite c t f
 
 -- a programmer defined hole
 hol :: Parser Term
-hol = do n <- sym "?" >> name; return $ Hol n
+hol = sym "?" >> (Hol <$> name <|> newHole)
 
--- top level term
+
 term :: Parser Term
 term = do
-  t <- choice
+  t <- term' <|> group
+  t' <- try $ fun t <|> return t
+  choice
+    [ try $ ann t'
+    , try $ opr t'
+    , return t'
+    ]
+  where
+    foldApp = foldl1 (\x y -> App x y Keep)
+
+    group :: Parser Term
+    group = sym "(" >> foldApp <$> (sc >> sepEndBy1 term sc) <* lit ")"
+
+    term' :: Parser Term
+    term' = choice
       [ try $ allLam
       , try $ let_
       , try $ typ
@@ -217,20 +216,10 @@ term = do
       , try $ f64
       , try $ u64
       , try $ refVar
-      , try $ group
       , try $ cse
       , try $ whn
       , try $ swt
       ]
-  t' <- choice
-    [ try $ fun t
-    , return t
-    ]
-  choice
-    [ try $ opr t'
-    , try $ ann t
-    , return t'
-    ]
 
 -- function style application
 fun :: Term -> Parser Term
@@ -321,34 +310,44 @@ ann x = do
 
 cse :: Parser Term
 cse = do
-  lit "case"
-  sc
-  match <- term
-  sc
-  as    <- try $ optional (sym "as" >> name <* sc)
-  withs <- try $ many with
-  cases <- try $ many c
-  type_ <- case cases of
-              [] -> Just <$> (sym ":" >> term)
-              _  -> optional (sym ":" >> term)
-  return $ Cse match withs cases type_
+  sym "case"
+  match <- term <* sc
+  as    <- optional (sym "as" >> name <* sc)
+  withs <- sepBy' wit sc
+  case withs of
+    [] -> do
+      cases <- sepBy' cas sc
+      case cases of
+        [] -> do
+          t <- sym ":" >> term
+          return $ Cse match [] [] (Just t)
+        _  -> do
+          t <- optional $ try $ (sc >> sym ":" >> term)
+          return $ Cse match [] cases t
+    _  -> do
+      sc
+      cases <- sepBy1' cas sc
+      t <- optional $ try $ (sc >> sym ":" >> term)
+      return $ Cse match withs cases t
   where
-    with :: Parser (Term,Term)
-    with = do
-      sym "with" 
+    -- Megaparsec sepBy is eager, we need non-eager sep
+    sepBy1' p sep = (:) <$> p <*> many (try $ sep >> p)
+    sepBy'  p sep = sepBy1' p sep <|> pure []
+
+    wit :: Parser (Term,Term)
+    wit = do
+      sym "with"
       x <- term <* sc
       t <- (sym ":" >> term <* sc) <|> newHole
       return (x,t)
 
 
-    c :: Parser (Name, Term)
-    c = do
+    cas :: Parser (Name, Term)
+    cas = do
       sym "|"
-      --ls <- gets _names
       n <- name <* sc
       sym "=>"
       t <- term
-      sc
       return (n,t)
 
 whn :: Parser Term
@@ -400,22 +399,24 @@ let_ :: Parser Term
 let_ = do
   sym "let"
   ds <- (sym "(" >> lets) <|> (pure <$> (def (sym "=") <* sepr))
-  t <- binders ((\(a, b) -> RefB a) <$> ds) $ group'
+  sc
+  t <- binders ((\(a, b) -> RefB a) <$> ds) $ term
   return $ Let (M.fromList ds) t
   where
+    sepr :: Parser (Maybe Text)
+    sepr = optional $ try $ (sc >> lit ";")
+
     lets :: Parser [(Name, Term)]
     lets = (lit ")" >> sepr >> return []) <|> next
 
     next :: Parser [(Name, Term)]
     next = do
      ls    <- asks _block
-     (n,t) <- def (sym "=") <* sepr
+     (n,t) <- def (sym "=") <* (sepr >> sc)
      when (Set.member n ls) (fail "attempted to redefine a name")
      ns <- block [n] $ lets
      return $ (n,t) : ns
 
-    sepr :: Parser (Maybe Text)
-    sepr = sc >> optional (sym ";" <|> sym ",")
 
 str :: Parser Term
 str = do

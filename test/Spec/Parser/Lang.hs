@@ -1,5 +1,7 @@
 module Spec.Parser.Lang where
 
+import           Prelude                    hiding (log)
+
 import           Test.Hspec
 import           Test.QuickCheck
 
@@ -12,12 +14,16 @@ import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import           Data.Void
 
+import           Text.Megaparsec            hiding (State)
+import           Text.Megaparsec.Char
+import qualified Text.Megaparsec.Char.Lexer as L
+
 import           Control.Monad.RWS.Lazy     hiding (All)
 
 import           Core                       (Eras (..), Name, Op (..))
 import           Lang
-import           Spec.Parser.Utils
 import           Parser.Lang
+import           Spec.Parser.Utils
 
 spec :: SpecWith ()
 spec = do
@@ -36,9 +42,9 @@ spec = do
     it "symbols following initial letter okay: \"a_\"" $ do
       parse' name "a_" `shouldBe` (Just "a_")
       parse' name "a_." `shouldBe` (Just "a_.")
-    it "reserved words fail: \"let\", \"rewrite\"" $ do
+    it "reserved words fail: \"let\", \"T\"" $ do
       parse' name "let" `shouldBe` Nothing
-      parse' name "rewrite" `shouldBe` Nothing
+      parse' name "T" `shouldBe` Nothing
 
   describe "Forall/Lambdas" $ do
     it "basic syntax: \"(A : Type) => A\"" $ do
@@ -91,11 +97,11 @@ spec = do
           (App (Var 0) (Var 1) Keep)))
   describe "Application" $ do
     it "function style applications: \"f(a)\"" $ do
-      parse' group' "f(a)" `shouldBe` (Just (App (Ref "f" 0) (Ref "a" 0) Keep))
+      parse' term "f(a)" `shouldBe` (Just (App (Ref "f" 0) (Ref "a" 0) Keep))
     it "multiple arguments: \"f(a,b,c)\"" $ do
-      parse' group' "f(a,b)" `shouldBe`
+      parse' term "f(a,b)" `shouldBe`
         (Just (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep))
-      parse' group' "f(a,b,c)" `shouldBe`
+      parse' term "f(a,b,c)" `shouldBe`
         (Just
           (App (App (App
             (Ref "f" 0)
@@ -103,7 +109,7 @@ spec = do
               (Ref "b" 0) Keep)
               (Ref "c" 0) Keep))
     it "parenthesized arguments: \"f(a)(b)(c)\"" $ do
-      parse' group' "f(a)(b)(c)" `shouldBe`
+      parse' term "f(a)(b)(c)" `shouldBe`
         (Just
           (App (App (App
             (Ref "f" 0)
@@ -111,7 +117,7 @@ spec = do
             (Ref "b" 0) Keep)
             (Ref "c" 0) Keep))
     it "erased parenthesized arguments: \"f(a;)(b;)(c;)\"" $ do
-      parse' group' "f(a;)(b;)(c;)" `shouldBe`
+      parse' term "f(a;)(b;)(c;)" `shouldBe`
         (Just
           (App (App (App
             (Ref "f" 0)
@@ -119,7 +125,7 @@ spec = do
               (Ref "b" 0) Eras)
               (Ref "c" 0) Eras))
     it "erased arguments: \"f(a;b;c;)\"" $ do
-      parse' group' "f(a;b;c;)" `shouldBe`
+      parse' term "f(a;b;c;)" `shouldBe`
         (Just
           (App (App (App
             (Ref "f" 0)
@@ -127,25 +133,25 @@ spec = do
             (Ref "b" 0) Eras)
             (Ref "c" 0) Eras))
     it "applying a lambda: \"((x) => x)(a,b)\"" $ do
-      parse' group' "((x) => x)(a,b)" `shouldBe`
+      parse' term "((x) => x)(a,b)" `shouldBe`
         (Just (App (App
           (Lam "x" (Hol "#0") Keep (Var 0))
           (Ref "a" 0) Keep)
           (Ref "b" 0) Keep))
     it "lambda style applications: \"(f a b c)\"" $ do
-      parse' group' "(f a b c)" `shouldBe`
+      parse' term "(f a b c)" `shouldBe`
         (Just (App (App (App
           (Ref "f" 0)
           (Ref "a" 0) Keep)
           (Ref "b" 0) Keep)
           (Ref "c" 0) Keep))
     it "lambda style applications: \"(f (a b) c)\"" $ do
-      parse' group' "(f (a b) c)" `shouldBe`
+      parse' term "(f (a b) c)" `shouldBe`
         (Just (App (App
           (Ref "f" 0)
           (App (Ref "a" 0) (Ref "b" 0) Keep) Keep)
           (Ref "c" 0) Keep))
-      parse' group' "(f (a (b c)))" `shouldBe`
+      parse' term "(f (a (b c)))" `shouldBe`
         (Just
           (App (Ref "f" 0)
             (App (Ref "a" 0)
@@ -280,8 +286,6 @@ spec = do
     it "let block" $ do
       parse' term "let (x = 1; y = 2); y" `shouldBe`
         (Just $ (Let (M.fromList [("x",U64 1),("y",U64 2)]) (Ref "y" 0)))
-      parse' term "let (x = 1, y = 2); y" `shouldBe`
-        (Just $ (Let (M.fromList [("x",U64 1),("y",U64 2)]) (Ref "y" 0)))
       parse' term "let (x = 1 y = 2); y" `shouldBe`
         (Just $ (Let (M.fromList [("x",U64 1),("y",U64 2)]) (Ref "y" 0)))
 
@@ -298,14 +302,14 @@ spec = do
     it "\"with\" statement" $ do
       parse' cse "case x with z with w | true => 1 | false => 0" `shouldBe`
         (Just $
-          Cse (Ref "x" 0) [Ref "z" 0, Ref "w" 0]
+          Cse (Ref "x" 0) [(Ref "z" 0, Hol "#0"), (Ref "w" 0, Hol "#1")]
             [ ("true", U64 1)
             , ("false", U64 0)
             ] Nothing)
     it "`\"as\" and \"with\" statements" $ do
       parse' cse "case x as y with z with w | true => 1 | false => 0" `shouldBe`
         (Just $
-          Cse (Ref "x" 0) [Ref "z" 0, Ref "w" 0]
+          Cse (Ref "x" 0) [(Ref "z" 0, Hol "#0"), (Ref "w" 0, Hol "#1")]
             [ ("true", U64 1)
             , ("false", U64 0)
             ] Nothing)
@@ -385,3 +389,71 @@ spec = do
         (Just $
           All "_" (App (Ref "P" 0) (Ref "a" 0) Keep) Keep
              (Ref "A" 0))
+    it "case inside let" $ do
+      parse' term "let P = (x : Bool) => case x | true => y | false => z w" 
+        `shouldBe`
+        (Just $
+          Let (M.fromList
+          [ ("P", Lam "x" (Ref "Bool" 0) Keep 
+              (Cse (Var 0) [] 
+                [ ("true",Ref "y" 0)
+                , ("false",Ref "z" 0)
+                ] Nothing))
+          ]) 
+        (Ref "w" 0))
+
+    it "terms do not consume leading or trailing whitespace" $ do
+      parse' (name <* eof) "a" `shouldBe` (Just $ "a")
+      parse' (name <* eof) "a " `shouldBe` Nothing
+      parse' (name <* eof) " a" `shouldBe` Nothing
+      parse' (refVar <* eof) "a" `shouldBe` (Just $ Ref "a" 0)
+      parse' (refVar <* eof) "a " `shouldBe` Nothing
+      parse' (refVar <* eof) " a" `shouldBe` Nothing
+      parse' (dbl <* eof) "Double" `shouldBe` (Just $ Dbl)
+      parse' (dbl <* eof) "Double " `shouldBe` Nothing
+      parse' (dbl <* eof) " Double" `shouldBe` Nothing
+      parse' (f64 <* eof) "1.0" `shouldBe` (Just $ F64 1.0)
+      parse' (f64 <* eof) "1.0 " `shouldBe` Nothing
+      parse' (f64 <* eof) " 1.0" `shouldBe` Nothing
+      parse' (wrd <* eof) "Word" `shouldBe` (Just $ Wrd)
+      parse' (wrd <* eof) "Word " `shouldBe` Nothing
+      parse' (wrd <* eof) " Word" `shouldBe` Nothing
+      parse' (u64 <* eof) "1" `shouldBe` (Just $ U64 1)
+      parse' (u64 <* eof) "1 " `shouldBe` Nothing
+      parse' (u64 <* eof) " 1" `shouldBe` Nothing
+      parse' (str <* eof) "\"\"" `shouldBe` (Just $ Str "")
+      parse' (str <* eof) "\"\" " `shouldBe` Nothing
+      parse' (str <* eof) " \"\"" `shouldBe` Nothing
+      parse' (chr_ <* eof) "'a'" `shouldBe` (Just $ Chr 'a')
+      parse' (chr_ <* eof) "'a' " `shouldBe` Nothing
+      parse' (chr_ <* eof) " 'a'" `shouldBe` Nothing
+      parse' (lst <* eof) "[]" `shouldBe` (Just $ Lst [])
+      parse' (lst <* eof) "[] " `shouldBe` Nothing
+      parse' (lst <* eof) " []" `shouldBe` Nothing
+      parse' (slf <* eof) "${x} A" `shouldBe` (Just $ Slf "x" (Ref "A" 0))
+      parse' (slf <* eof) " ${x} A" `shouldBe` Nothing
+      parse' (slf <* eof) "${x} A " `shouldBe` Nothing
+      parse' (new <* eof) "new(A) x" `shouldBe` (Just $ New (Ref "A" 0) (Ref "x" 0))
+      parse' (new <* eof) " new(A) x" `shouldBe` Nothing
+      parse' (new <* eof) "new(A) x " `shouldBe` Nothing
+      parse' (log <* eof) "log(A) x" `shouldBe` (Just $ Log (Ref "A" 0) (Ref "x" 0))
+      parse' (log <* eof) " log(A) x" `shouldBe` Nothing
+      parse' (log <* eof) "log(A) x " `shouldBe` Nothing
+      -- use
+      -- ite
+      -- hol
+      -- refVar
+      -- cse
+      -- whn
+      -- swt
+
+
+-- Problems:
+-- "-1" syntax
+-- Pair literal
+-- get
+-- dictionary literal
+-- do notation
+-- with as
+-- rewrite . syntax
+
