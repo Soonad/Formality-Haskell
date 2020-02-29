@@ -44,8 +44,11 @@ data Term
   | Chr Char                     -- Character literal
   | Nat Bool Int                 -- Natural number literal
   | Bit Bool Integer             -- Bitstring literal
-  | Par Term Term                -- Pair literal
+  | Par [Term]                   -- Pair literal
+  | PTy [Term]                   -- Pair literal
+  | Get Name Name Term Term
   | Lst [Term]
+  | Sig [(Maybe Name,Term)] Term
   deriving (Eq, Show, Ord)
 
 -- Lang.Declaration

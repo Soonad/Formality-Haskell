@@ -186,7 +186,7 @@ spec = do
           Let (M.fromList [("x",U64 1)]) $
           Let (M.fromList [("x",U64 0)]) $
           (Ref "x" 2))
-    it "mixing lets and lambdas: ((x) => let x = 1; let x = 0; x)(2)" $ do
+    it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => x)(0)\"" $ do
       parse' let_ "let x = 2; let x = 1; ((x) => x)(0)" `shouldBe`
         (Just $
           Let (M.fromList [("x",U64 2)]) $
@@ -447,13 +447,15 @@ spec = do
       -- whn
       -- swt
 
+    --it "nested case" $ do
+      --parse' cse "case x | foo1 => case y | bar1 => 2 | foo2 => 3"
+
 
 -- Problems:
 -- "-1" syntax
--- Pair literal
--- get
--- dictionary literal
 -- do notation
 -- with as
 -- rewrite . syntax
-
+--
+-- trailing `,` in args and lst
+-- () or #[] pair syntax
