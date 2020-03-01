@@ -8,7 +8,7 @@ import Control.Monad.Except
 
 import           Data.Equivalence.Monad
 import qualified Data.Map.Strict as M
-import           Data.Sequence (Seq(..))
+import           Data.Sequence (Seq(..), (><))
 import qualified Data.Sequence as S
 
 import           Data.Text (Text)
@@ -155,41 +155,48 @@ headForm defs term = case term of
   App f a e -> case headForm defs f of
                Lam _ _ _ b -> headForm defs (subst b a 0)
                f     -> App f a e
+  Op1 o a b -> case headForm defs b of
+    Val n -> Val $ op o a n
+    x     -> Op1 o a x
+  Op2 o a b -> case headForm defs a of
+    Val n -> headForm defs (Op1 o n b)
+    x     -> Op2 o x b
+  Ite c t f -> case headForm defs c of
+    Val n -> if n > 0 then headForm defs t else headForm defs f
+    x     -> Ite x t f
   Ref name  -> headForm defs (dereference name defs)
   _         -> term
 
-data Node a = Stop | Branch1 a | Branch2 a a | Branch3 a a a deriving (Eq, Ord, Show)
-
-sameNode :: Term -> Term -> Path -> Node (Term, Term, Path)
+sameNode :: Term -> Term -> Path -> Seq (Term, Term, Path)
 sameNode t1 t2 ps = case (t1, t2) of
   (App f a _, App f' a' _) ->
-    Branch2 (f, f', ps :|> Lft) (a, a', ps :|> Rgt)
+    S.fromList [(f, f', ps :|> Lft), (a, a', ps :|> Rgt)]
   (Lam _ _ _ b, Lam _ _ _ b') ->
-    Branch1 (subst b (Bound ps) 0, subst b' (Bound ps) 0, ps :|> Rgt)
+    S.singleton (subst b (Bound ps) 0, subst b' (Bound ps) 0, ps :|> Rgt)
   (All _ h _ b, All _ h' _ b') ->
-    Branch2 (h, h', ps :|> Lft) (subst b (Bound ps) 0, subst b' (Bound ps) 0, ps :|> Rgt)
+    S.fromList [(h, h', ps :|> Lft), (subst b (Bound ps) 0, subst b' (Bound ps) 0, ps :|> Rgt)]
   (Slf _ b, Slf _ b') ->
-    Branch1 (subst b (Bound ps) 0, subst b' (Bound ps) 0, ps :|> Ctr)
+    S.singleton (subst b (Bound ps) 0, subst b' (Bound ps) 0, ps :|> Ctr)
   (New _ b, New _ b') ->
-    Branch1 (b, b', ps :|> Rgt)
+    S.singleton (b, b', ps :|> Rgt)
   (Use b, Use b') ->
-    Branch1 (b, b', ps :|> Ctr)
+    S.singleton (b, b', ps :|> Ctr)
   (Op1 op i b, Op1 op' i' b') ->
     if i /= i' || op /= op'
-    then Stop
-    else Branch1 (b, b', ps :|> Ctr)
+    then Empty
+    else S.singleton (b, b', ps :|> Ctr)
   (Op2 op a b, Op2 op' a' b') ->
     if op /= op'
-    then Stop
-    else Branch2 (a, a', ps :|> Lft) (b, b', ps :|> Rgt)
+    then Empty
+    else S.fromList [(a, a', ps :|> Lft), (b, b', ps :|> Rgt)]
   (Ite b t f, Ite b' t' f') ->
-    Branch3 (b, b', ps :|> Lft) (t, t', ps :|> Ctr) (f, b', ps :|> Rgt)
+    S.fromList [(b, b', ps :|> Lft), (t, t', ps :|> Ctr), (f, b', ps :|> Rgt)]
   (Ann _ b, Ann _ b') ->
-    Branch1 (b, b', ps :|> Rgt)
+    S.singleton (b, b', ps :|> Rgt)
   (Log _ b, Log _ b') ->
-    Branch1 (b, b', ps :|> Rgt)
+    S.singleton (b, b', ps :|> Rgt)
   _ ->
-    Stop
+    Empty
 
 equivalentTerms term1 term2 = do
   e <- equivalent term1 term2
@@ -226,7 +233,5 @@ equal defs term1 term2 = runEquivM' $ go (S.singleton (term1, term2, Empty)) whe
       then go tris
       else
       case sameNode term1 term2 ps of
-        Branch1 tri            -> go (tris :|> tri)
-        Branch2 tri1 tri2      -> go (tris :|> tri1 :|> tri2)
-        Branch3 tri1 tri2 tri3 -> go (tris :|> tri1 :|> tri2 :|> tri3)
-        Stop                   -> return False
+        Empty -> return False
+        tris' -> go (tris >< tris')
