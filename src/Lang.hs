@@ -1,18 +1,15 @@
 module Lang where
 
-import           Data.Map.Strict            (Map)
-import qualified Data.Map.Strict            as M
-
-import Data.Word
-
+import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.ByteString (ByteString)
-import           Data.Text                  (Text)
-import qualified Data.Text                  as T
+import           Data.Map.Strict (Map)
+import qualified Data.Map.Strict as M
+import           Data.Text       (Text)
+import qualified Data.Text       as T
+import           Data.Word
 
-import           Core                       (Eras (..), Name, Op (..))
-import qualified Core                       as Core
-
+import           Core            (Eras (..), Name, Op (..))
+import qualified Core            as Core
 
 -- Lang.Term
 -- The Formality frontend language which includes syntax sugar
@@ -28,7 +25,7 @@ data Term
   | Let (Map Name Term) Term     -- Recursive locally scoped definition
   | Whn [(Term, Term)] Term      -- When-statement
   | Swt Term [(Term,Term)] Term  -- Switch-statement
-  | Cse Term [(Term, Term)] [(Name, Term)] (Maybe Term) -- Case-statement
+  | Cse Term [(Name, Term, Term)] [(Name, Term)] (Maybe Term) -- Case-statement
   | Rwt Term Term                -- Rewrite
   | Wrd                          -- U64 Number type
   | Dbl                          -- F64 Number Type
@@ -40,15 +37,15 @@ data Term
   | Log Term Term                -- inline log
   | Hol Name                     -- type hole or metavariable
   | Ref Name Int                 -- reference to a definition
-  | Str Text                     -- String literal
-  | Chr Char                     -- Character literal
-  | Nat Bool Int                 -- Natural number literal
-  | Bit Bool Integer             -- Bitstring literal
-  | Par [Term]                   -- Pair literal
-  | PTy [Term]                   -- Pair literal
-  | Get Name Name Term Term
-  | Lst [Term]
-  | Sig [(Maybe Name,Term)] Term
+  | Str Text                     -- String value
+  | Chr Char                     -- Character value
+  | Nat Bool Int                 -- Natural number value
+  | Bit Bool Integer             -- Bitstring value
+  | Par [Term]                   -- Pair value
+  | PTy [Term]                   -- Pair type
+  | Get Name Name Term Term      -- Pair projection
+  | Lst [Term]                   -- List valu
+  | Sig [(Maybe Name,Term)] Term -- Sigma type
   deriving (Eq, Show, Ord)
 
 -- Lang.Declaration
@@ -56,13 +53,18 @@ data Term
 data Declaration
   = Expr Name Term
   | Enum [Name]
-  | Data Name [Param] [Index] [Ctor]
+  | Data ADT
   | Impt Text Text
   deriving (Eq, Show, Ord)
 
 type Param = (Name,Term)
 type Index = (Name,Term)
-data Ctor = Ctor Name [Param] (Maybe Term) deriving (Eq, Show, Ord)
+data Ctor = Ctor
+  { _ctorParams :: [Param]
+  , _ctorType   :: (Maybe Term)
+  } deriving (Eq, Show, Ord)
 
--- a PreModule is an unsynthesized/unchecked collection of defintions
+data ADT = ADT Name [Param] [Index] (M.Map Name Ctor) deriving (Eq, Show, Ord)
+
+-- a PreModule is an unsynthesizedunchecked collection of declarations
 type PreModule = [Declaration]

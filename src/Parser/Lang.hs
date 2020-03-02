@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 module Parser.Lang where
 
 import           Prelude                    hiding (log)
@@ -106,7 +107,6 @@ nat = do
   t <- (lit "n" >> return False) <|> (lit "N" >> return True)
   return $ Nat t v
 
-
 -- The type "Type"
 typ :: Parser Term
 typ = lit "Type" >> return Typ
@@ -114,8 +114,7 @@ typ = lit "Type" >> return Typ
 -- forall or lambda
 allLam :: Parser Term
 allLam = do
-  bs <- binds True "(" ")"
-  sc
+  bs <- binds True "(" ")" <* sc
   ctor <- (sym "->" >> return All) <|> (sym "=>" >> return Lam)
   body <- binders ((\(x,y,z) -> VarB x) <$> bs) term
   return $ foldr (\(n,t,e) x -> ctor n t e x) body bs
@@ -128,29 +127,18 @@ binds erasable start end = sym start >> go
 
     next :: Parser [(Name,Term,Eras)]
     next = do
-      (b, bT) <- binderAndType
-      e <- if erasable
-           then optional $ (sym ",") <|> (sym ";")
-           else optional (sym ",")
-      case e of
-        Just ";" -> (do bs <- binders [VarB b] $ go; return $ (b,bT,Eras) : bs)
-        _        -> (do bs <- binders [VarB b] $ go; return $ (b,bT,Keep) : bs)
-
-    binderAndType :: Parser (Name, Term)
-    binderAndType = do
-      b <- optional $ (try $ lit "_") <|> name
-      case b of
-        Just n -> do
-          bT <- sc >> (optional $ sym ":" >> term)
-          sc
-          case bT of
-            Just x -> return (n,x)
-            Nothing -> (\x -> (n,x)) <$> newHole
-
-        Nothing -> do
-          bT <- sym ":" >> term
-          sc
-          return ("_",bT)
+      (b, t) <- choice
+        [ ("_",) <$> (sym ":" >> term <* sc)
+        , (,) <$> ((try $ lit "_") <|> name)
+              <*> ((sc >> (sym ":" >> term) <* sc) <|> newHole)
+        ]
+      e <- choice 
+        [ (sym ",") >> return Keep
+        , if erasable then (sym ";") >> return Eras else fail ""
+        , lookAhead (try $ sc >> lit end) >> return Keep
+        ]
+      bs <- binders [VarB b] $ go
+      return $ (b,t,e) : bs
 
 -- get a hole with a unique name
 newHole :: Parser Term
@@ -162,8 +150,8 @@ newHole = do
 -- a self-type
 slf :: Parser Term
 slf = do
-  n <- (sym "${" >> name <* sc <* sym "}")
-  Slf n <$> binders [VarB n] term
+  n <- sym "${" >> name <* sc <* sym "}"
+  Slf n <$> (binders [VarB n] term)
 
 -- a self-type introduction
 new :: Parser Term
@@ -187,70 +175,22 @@ ite = Ite <$> (sym "if" >> term <* sc)
 hol :: Parser Term
 hol = sym "?" >> (Hol <$> name <|> newHole)
 
-term :: Parser Term
-term = do
-  t <- term' <|> group
-  t' <- try $ fun t <|> return t
-  choice
-    [ try $ ann t'
-    , try $ opr t'
-    , return t'
-    ]
-  where
-    group :: Parser Term
-    group = sym "(" >> foldApp <$> (sc >> sepEndBy1 term sc) <* lit ")"
-    foldApp = foldl1 (\x y -> App x y Keep)
-
-    term' :: Parser Term
-    term' = choice
-      [ try $ allLam
-      , try $ let_
-      , try $ get_
-      , try $ typ
-      , try $ dbl
-      , try $ wrd
-      , try $ str
-      , try $ chr_
-      , try $ lst
-      , try $ slf
-      , try $ new
-      , try $ log
-      , try $ use
-      , try $ ite
-      , try $ hol
-      , try $ bit
-      , try $ nat
-      , try $ f64
-      , try $ u64
-      , try $ refVar
-      , try $ cse
-      , try $ mth
-      , try $ whn
-      , try $ swt
-      , try $ lst
-      , try $ par
-      , try $ pTy
-      ]
-
 -- function style application
 fun :: Term -> Parser Term
 fun f = foldl (\t (a,e) -> App t a e) f <$> (concat <$> some args)
-
--- arguments to a function style application
-args :: Parser [(Term, Eras)]
-args = sym "(" >> go
   where
-    go   = (sc >> lit ")" >> return []) <|> next
-    next = do (a,e) <- holeArg <|> termArg; as <- go; return $ (a,e) : as
-    holeArg = sym "_" >> (\x -> (x,Eras)) <$> newHole
-    termArg = do
-      t <- term
-      e <- choice
-        [ sym "," >> return Keep
-        , sym ";" >> return Eras
-        , lookAhead (try $ sc >> lit ")") >> return Keep
-        ]
-      return (t,e)
+  args    = sym "(" >> go
+  go      = (sc >> lit ")" >> return []) <|> next
+  next    = do (a,e) <- holeArg <|> termArg; as <- go; return $ (a,e) : as
+  holeArg = sym "_" >> (\x -> (x,Eras)) <$> newHole
+  termArg = do
+        t <- term
+        e <- choice
+          [ sym "," >> return Keep
+          , sym ";" >> return Eras
+          , lookAhead (try $ sc >> lit ")") >> return Keep
+          ]
+        return (t,e)
 
 -- an operator name
 opName :: Parser Text
@@ -306,89 +246,89 @@ ann x = (\y -> Ann y x) <$> (sc >> sym "::" >> (rwt <|> term))
 -- | foo => 1
 -- | bar => 2
 -- : Q
+--
+
+
 cse :: Parser Term
 cse = do
   sym "case"
-  match <- term <* sc
-  as    <- optional (sym "as" >> name <* sc)
-  withs <- sepBy' wit sc
-  case withs of
-    [] -> do
-      cases <- sepBy' cas sc
-      case cases of
-        [] -> Cse match [] [] <$> Just <$> (sym ":" >> term)
-        _  -> Cse match [] cases <$> (optional $ try $ (sc >> sym ":" >> term))
-    _  -> Cse match withs
-            <$> (sc >> sepBy1' cas sc)
-            <*> (optional $ try $ (sc >> sym ":" >> term))
+  (as,m) <- namedTerm <* sc
+  ws     <- sepBy' wit sc <* sc
+  (cs,t) <- cases as <|> empty
+  return $ Cse m ws cs t
   where
-    cas :: Parser (Name, Term)
-    cas = (,) <$> (sym "|" >> name <* sc) <*> (sym "=>" >> term)
+    wit :: Parser (Name, Term, Term)
+    wit = do
+      (n,m) <- sym "with" >> namedTerm
+      t     <- (sc >> sym ":" >> term) <|> newHole
+      return (n,m,t)
 
-    wit :: Parser (Term,Term)
-    wit = (,) <$> (sym "with" >> term <* sc)
-              <*> ((sym ":" >> term <* sc) <|> newHole)
+    empty :: Parser ([(Name,Term)], Maybe Term)
+    empty = (\x -> ([],x)) <$> (Just <$> (sym ":" >> term))
 
--- rust-style match expression
--- match x as y
--- with c : P
--- { foo => 1,
---   bar => 2
--- } : Word
+    cases :: Name -> Parser ([(Name,Term)], Maybe Term)
+    cases as = do
+      n <- lookAhead (sym "|" >> name)
+      acs   <- gets _adtCtors
+      case acs M.!? n of
+        Nothing -> fail "can't find ADT"
+        Just (ADT _ ps _ m) -> do
+          cs <- go as ps m []
+          ty <- optional $ try $ (sc >> sym ":" >> term)
+          return $ (cs, ty)
 
-mth :: Parser Term
-mth = do
-  sym "match"
-  x  <- term <* sc
-  as <- (optional (sym "as" >> name <* sc))
-  ws <- sepBy' wit sc
-  sym "{"
-  cs <- sepBy' ((,) <$> (name <* sc) <*> (sym "=>" >> term)) (sc >> sym ",")
-  sc >> sym "}"
-  t <- optional $ try $ (sc >> sym ":" >> term)
-  return $ Cse x ws cs t
+    go :: Name -> [Param] -> M.Map Name Ctor -> [(Name,Term)] -> Parser [(Name,Term)]
+    go as ps m cs = do
+      n <- sym "|" >> name <* sc
+      when (M.notMember n m) (fail "constructor not in ADT")
+      let adtBinds = VarB . fst <$> ps
+      let ctorParams = _ctorParams $ m M.! n
+      let ctorBinds = (\(a,b) -> VarB $ T.concat [as, ".", a]) <$> ctorParams
+      t <- binders (adtBinds ++ ctorBinds) $ sym "=>" >> term
+      let m' = M.delete n m
+      if m' == M.empty
+      then return cs
+      else sc >> go as ps m' ((n,t):cs)
+
+namedTerm :: Parser (Name,Term)
+namedTerm = do
+  n <- optional $ try $ lookAhead name
+  m <- term
+  case (n,m) of
+    (Just n, Ref _ _) -> go n m
+    (Just n, Var _)   -> go n m
+    (_,  _) -> do
+      n' <- sc >> sym "as" >> name
+      return (n',m)
   where
-    wit :: Parser (Term,Term)
-    wit = (,) <$> (sym "with" >> term <* sc)
-              <*> ((sym ":" >> term <* sc) <|> newHole)
+    go n m = do
+      n' <- maybe n id <$> (optional $ try $ sc >> sym "as" >> name)
+      return $ (n',m)
 
--- Megaparsec sepBy is eager, we need non-eager sep
+
+
+
+
+-- Megaparsec sepBy is eager, we need non-eager sep 
+
 sepBy1' p sep = (:) <$> p <*> many (try $ sep >> p)
 sepBy'  p sep = sepBy1' p sep <|> pure []
 -- Parses at least 2
 sepBy2' p sep = (:) <$> (p <* sep) <*> sepBy1' p sep
 
-
 whn :: Parser Term
-whn = do
-  sym "when"
-  ws <- some w
-  sc
-  sym "else"
-  f <- term
-  return $ Whn ws f
+whn = Whn <$> (sym "when" >> some w <* sc) <*> (sym "else" >> term)
   where
     w = do sym "|"; c <- term; sc; sym "=>"; t <- term; sc; return (c,t)
 
 swt :: Parser Term
-swt = do
-  sym "switch"
-  n <- term
-  sc
-  ws <- some w
-  sc
-  sym "else"
-  f <- term
-  return $ Swt n ws f
+swt = Swt <$> (sym "switch" >> term <* sc) <*> (some w <* sc) <*> (sym "else" >> term)
   where
     w = do sym "|"; c <- term; sc; sym "=>"; t <- term; sc; return (c,t)
 
 def :: Parser a -> Parser (Name, Term)
 def x = do
   n  <- name
-  ls <- asks _block
-  ds <- gets _names
-  when (Set.member n ls || Set.member n ds) (fail "attempted to redefine a name")
   bs <- (optional $ binds True "(" ")")
   sc
   let ns = maybe [] (fmap (\(a,b,c) -> VarB a)) bs
@@ -407,9 +347,8 @@ def x = do
 let_ :: Parser Term
 let_ = do
   sym "let"
-  ds <- (sym "(" >> lets) <|> (pure <$> (def (sym "=") <* sepr))
-  sc
-  t <- binders ((\(a, b) -> RefB a) <$> ds) $ term
+  ds <- (sym "(" >> lets) <|> (pure <$> (def (sym "=") <* sepr)) <* sc
+  t <- binders (RefB . fst <$> ds) $ term
   return $ Let (M.fromList ds) t
   where
     sepr :: Parser (Maybe Text)
@@ -420,18 +359,15 @@ let_ = do
 
     next :: Parser [(Name, Term)]
     next = do
-     ls    <- asks _block
      (n,t) <- def (sym "=") <* (sepr >> sc)
-     when (Set.member n ls) (fail "attempted to redefine a name")
-     ns <- block [n] $ lets
+     ns <- block n $ lets
      return $ (n,t) : ns
 
 get_ :: Parser Term
 get_ = do
   sym "get" >> (sym "[" <|> sym "#[")
   x <- name <* sc <* sym ","
-  y <- name <* sc <* sym "]"
-  sym "="
+  y <- name <* sc <* sym "]" <* sym "="
   t <- term <* sc <* optional (sym ";")
   b <- binders [RefB x, RefB y] term
   return $ Get x y t b
@@ -439,15 +375,13 @@ get_ = do
 str :: Parser Term
 str = do
   char '"'
-  cs <- many $ nonEscape <|> empty <|> (pure <$> esc)
+  cs <- many $ choice
+    [ pure <$> noneOf ("\\\"" :: String)
+    , lit "\\&" >> return []
+    , pure <$> esc
+    ]
   char '"'
   return $ Str . T.pack . concat $ cs
-  where
-    nonEscape :: Parser [Char]
-    nonEscape = pure <$> noneOf ("\\\"" :: String)
-
-    empty :: Parser [Char]
-    empty = lit "\\&" >> return []
 
 chr_ :: Parser Term
 chr_ = Chr <$> (char '\'' >> (noneOf ("\\\'" :: String) <|> esc) <* char '\'')
@@ -541,3 +475,46 @@ sig = do
   where
     p = (,) <$> (optional $ name <* sc) <*> term
 
+term :: Parser Term
+term = do
+  t <- term' <|> group
+  t' <- try $ fun t <|> return t
+  choice
+    [ try $ ann t'
+    , try $ opr t'
+    , return t'
+    ]
+  where
+    group :: Parser Term
+    group = sym "(" >> foldApp <$> (sc >> sepEndBy1 term sc) <* lit ")"
+    foldApp = foldl1 (\x y -> App x y Keep)
+
+    term' :: Parser Term
+    term' = choice
+      [ try $ allLam
+      , try $ let_
+      , try $ get_
+      , try $ typ
+      , try $ dbl
+      , try $ wrd
+      , try $ str
+      , try $ chr_
+      , try $ lst
+      , try $ slf
+      , try $ new
+      , try $ log
+      , try $ use
+      , try $ ite
+      , try $ hol
+      , try $ bit
+      , try $ nat
+      , try $ f64
+      , try $ u64
+      , try $ refVar
+      , try $ cse
+      , try $ whn
+      , try $ swt
+      , try $ lst
+      , try $ par
+      , try $ pTy
+      ]
