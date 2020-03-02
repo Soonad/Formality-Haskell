@@ -78,12 +78,15 @@ import_ = do
   where
     isFileID x = elem x (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
 
-seekADT :: Parser ADT
-seekADT = datatype <|> (takeP Nothing 1 >> seekADT)
+seekADT :: Parser [ADT]
+seekADT = lookAhead $ sc >> many go
+  where
+    go :: Parser ADT
+    go = (try datatype) <|> (takeP Nothing 1 >> sc >> go)
 
 premodule :: Parser [Declaration]
 premodule = do
-  adts <- lookAhead $ many $ try seekADT
+  adts <- seekADT
   sequence $ adtCtors <$> adts
   sc >> decls
   where
