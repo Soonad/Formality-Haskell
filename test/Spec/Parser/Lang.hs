@@ -289,30 +289,6 @@ spec = do
       parse' term "let (x = 1 y = 2); y" `shouldBe`
         (Just $ (Let (M.fromList [("x",U64 1),("y",U64 2)]) (Ref "y" 0)))
 
-  describe "case expressions" $ do
-    it "Empty" $ do
-      parse' cse "case x : Word" `shouldBe`
-        (Just $ Cse (Ref "x" 0) [] [] (Just Wrd))
-    it "Bool" $ do
-      parse' cse "case x | true => 1 | false => 0" `shouldBe`
-        (Just $ Cse (Ref "x" 0) [] [("true", U64 1), ("false", U64 0)] Nothing)
-    it "\"as\" statement" $ do
-      parse' cse "case x as y | true => 1 | false => 0" `shouldBe`
-        (Just $ Cse (Ref "x" 0) [] [("true", U64 1), ("false", U64 0)] Nothing)
-    it "\"with\" statement" $ do
-      parse' cse "case x with z with w | true => 1 | false => 0" `shouldBe`
-        (Just $
-          Cse (Ref "x" 0) [(Ref "z" 0, Hol "#0"), (Ref "w" 0, Hol "#1")]
-            [ ("true", U64 1)
-            , ("false", U64 0)
-            ] Nothing)
-    it "`\"as\" and \"with\" statements" $ do
-      parse' cse "case x as y with z with w | true => 1 | false => 0" `shouldBe`
-        (Just $
-          Cse (Ref "x" 0) [(Ref "z" 0, Hol "#0"), (Ref "w" 0, Hol "#1")]
-            [ ("true", U64 1)
-            , ("false", U64 0)
-            ] Nothing)
 
   describe "when/switch" $ do
     it "when" $ do
@@ -389,18 +365,6 @@ spec = do
         (Just $
           All "_" (App (Ref "P" 0) (Ref "a" 0) Keep) Keep
              (Ref "A" 0))
-    it "case inside let" $ do
-      parse' term "let P = (x : Bool) => case x | true => y | false => z w" 
-        `shouldBe`
-        (Just $
-          Let (M.fromList
-          [ ("P", Lam "x" (Ref "Bool" 0) Keep 
-              (Cse (Var 0) [] 
-                [ ("true",Ref "y" 0)
-                , ("false",Ref "z" 0)
-                ] Nothing))
-          ]) 
-        (Ref "w" 0))
 
     it "terms do not consume leading or trailing whitespace" $ do
       parse' (name <* eof) "a" `shouldBe` (Just $ "a")
@@ -449,7 +413,6 @@ spec = do
 
     --it "nested case" $ do
       --parse' cse "case x | foo1 => case y | bar1 => 2 | foo2 => 3"
-
 
 -- Problems:
 -- "-1" syntax

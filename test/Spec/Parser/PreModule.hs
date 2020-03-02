@@ -43,23 +43,35 @@ spec = do
 
   describe "ADT" $ do
     it "T Empty" $ do
-        parse' datatype "T Empty" `shouldBe` (Just $ Data "Empty" [] [] [])
+        parse' datatype "T Empty" `shouldBe` (Just $ ADT "Empty" [] [] M.empty)
+
     it "T Bool | true | false" $ do
         parse' datatype "T Bool | true | false" `shouldBe` 
-          (Just $ Data "Bool" [] [] [Ctor "true" [] Nothing, Ctor "false" [] Nothing])
+          (Just $ ADT "Bool" [] [] 
+            (M.fromList
+              [ ("true", Ctor [] Nothing)
+              , ("false", Ctor [] Nothing)
+              ]
+            )
+          )
     it "T The{A} (x : A) | the(x : A) : The(A,x)" $ do
         parse' datatype "T The{A} (x : A) | the(x : A) : The(A,x)" `shouldBe`
           (Just $ 
-            Data "The" [("A", Hol "#0")] [("x", Var 0)] 
-              [Ctor "the" [("x", Var 0)]
-                (Just (App (App (Ref "The" 0) (Var 1) Keep) (Var 0) Keep))])
+            ADT "The" [("A", Hol "#0")] [("x", Var 0)]
+              (M.fromList
+                [("the"
+                 , Ctor [("x", Var 0)]
+                     (Just (App (App (Ref "The" 0) (Var 1) Keep) (Var 0) Keep)))
+                ])
+           )
     it "T Either{A,B} | lft(value : A) | rgt(value : B)" $ do
        parse' datatype "T Either{A,B} | lft(value : A) | rgt(value : B)" `shouldBe`
          (Just $
-           Data "Either" [("A", Hol "#0"), ("B",Hol "#1")] []
-             [ Ctor "lft" [("value", Var 1)] Nothing
-             , Ctor "rgt" [("value", Var 0)] Nothing
-             ]
+           ADT "Either" [("A", Hol "#0"), ("B",Hol "#1")] []
+             (M.fromList
+               [ ("lft", Ctor [("value", Var 1)] Nothing)
+               , ("rgt", Ctor [("value", Var 0)] Nothing)
+               ])
          )
 
   describe "Enum" $ do
@@ -69,3 +81,85 @@ spec = do
   describe "import" $ do
     it "import Nat" $ do
       parse' import_ "import Nat" `shouldBe` (Just $ Impt "Nat" "")
+
+  describe "case expressions" $ do
+    it "Empty" $ do
+      parse' premodule "T Empty foo case x : Word" `shouldBe`
+        (Just $ 
+          [ Data (ADT "Empty" [] [] M.empty)
+          , Expr "foo" (Cse (Ref "x" 0) [] M.empty (Just Wrd))
+          ]
+        )
+    it "Bool" $ do
+      parse' premodule
+        "T Bool | true | false foo case true | true => 1 | false => 2" `shouldBe`
+        (Just $ 
+          [ Data (ADT "Bool" [] [] 
+             (M.fromList
+               [ ("true", Ctor [] Nothing)
+               , ("false", Ctor [] Nothing)
+               ]))
+          , Expr "foo" (Cse (Ref "true" 0) [] 
+              (M.fromList [("true",U64 1), ("false",U64 2)])
+              Nothing)
+          ]
+        )
+      parse' premodule
+        "T Bool | true | false foo case true | false => 2 | true => 1" `shouldBe`
+        (Just $ 
+          [ Data (ADT "Bool" [] [] 
+             (M.fromList
+               [ ("true", Ctor [] Nothing)
+               , ("false", Ctor [] Nothing)
+               ]))
+          , Expr "foo" (Cse (Ref "true" 0) [] 
+              (M.fromList [("true",U64 1), ("false",U64 2)])
+              Nothing)
+          ]
+        )
+    it "Bool" $ do
+      parse' premodule
+        "foo case true | true => 1 | false => 2 T Bool | true | false" `shouldBe`
+        (Just $
+          [ Expr "foo" (Cse (Ref "true" 0) [] 
+              (M.fromList [("true",U64 1), ("false",U64 2)])
+              Nothing)
+          , Data (ADT "Bool" [] [] 
+             (M.fromList
+               [ ("true", Ctor [] Nothing)
+               , ("false", Ctor [] Nothing)
+               ]))
+          ]
+        )
+    --  parse' cse "case x | true => 1 | false => 0" `shouldBe`
+    --    (Just $ Cse (Ref "x" 0) [] [("true", U64 1), ("false", U64 0)] Nothing)
+    --it "\"as\" statement" $ do
+    --  parse' cse "case x as y | true => 1 | false => 0" `shouldBe`
+    --    (Just $ Cse (Ref "x" 0) [] [("true", U64 1), ("false", U64 0)] Nothing)
+    --it "\"with\" statement" $ do
+    --  parse' cse "case x with z with w | true => 1 | false => 0" `shouldBe`
+    --    (Just $
+    --      Cse (Ref "x" 0) [("z",Ref "z" 0, Hol "#0"), ("w",Ref "w" 0, Hol "#1")]
+    --        [ ("true", U64 1)
+    --        , ("false", U64 0)
+    --        ] Nothing)
+    --it "`\"as\" and \"with\" statements" $ do
+    --  parse' cse "case x as y with z with w | true => 1 | false => 0" `shouldBe`
+    --    (Just $
+    --      Cse (Ref "x" 0) [("z",Ref "z" 0, Hol "#0"), ("w",Ref "w" 0, Hol "#1")]
+    --        [ ("true", U64 1)
+    --        , ("false", U64 0)
+    --        ] Nothing)
+    --
+    --it "case inside let" $ do
+    --  parse' term "let P = (x : Bool) => case x | true => y | false => z w" 
+    --    `shouldBe`
+    --    (Just $
+    --      Let (M.fromList
+    --      [ ("P", Lam "x" (Ref "Bool" 0) Keep 
+    --          (Cse (Var 0) [] 
+    --            [ ("true",Ref "y" 0)
+    --            , ("false",Ref "z" 0)
+    --            ] Nothing))
+    --      ]) 
+    --    (Ref "w" 0))

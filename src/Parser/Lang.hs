@@ -263,10 +263,10 @@ cse = do
       t     <- (sc >> sym ":" >> term) <|> newHole
       return (n,m,t)
 
-    empty :: Parser ([(Name,Term)], Maybe Term)
-    empty = (\x -> ([],x)) <$> (Just <$> (sym ":" >> term))
+    empty :: Parser (Map Name Term, Maybe Term)
+    empty = (\x -> (M.empty,x)) <$> (Just <$> (sym ":" >> term))
 
-    cases :: Name -> Parser ([(Name,Term)], Maybe Term)
+    cases :: Name -> Parser (Map Name Term, Maybe Term)
     cases as = do
       n <- lookAhead (sym "|" >> name)
       acs   <- gets _adtCtors
@@ -277,7 +277,7 @@ cse = do
           ty <- optional $ try $ (sc >> sym ":" >> term)
           return $ (cs, ty)
 
-    go :: Name -> [Param] -> M.Map Name Ctor -> [(Name,Term)] -> Parser [(Name,Term)]
+    go :: Name -> [Param] -> M.Map Name Ctor -> [(Name,Term)] -> Parser (Map Name Term)
     go as ps m cs = do
       n <- sym "|" >> name <* sc
       when (M.notMember n m) (fail "constructor not in ADT")
@@ -287,7 +287,7 @@ cse = do
       t <- binders (adtBinds ++ ctorBinds) $ sym "=>" >> term
       let m' = M.delete n m
       if m' == M.empty
-      then return cs
+      then return $ M.fromList ((n,t):cs)
       else sc >> go as ps m' ((n,t):cs)
 
 namedTerm :: Parser (Name,Term)
@@ -347,7 +347,8 @@ def x = do
 let_ :: Parser Term
 let_ = do
   sym "let"
-  ds <- (sym "(" >> lets) <|> (pure <$> (def (sym "=") <* sepr)) <* sc
+  ds <- (sym "(" >> lets) <|> (pure <$> (def (sym "=") <* sepr))
+  sc
   t <- binders (RefB . fst <$> ds) $ term
   return $ Let (M.fromList ds) t
   where

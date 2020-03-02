@@ -83,7 +83,7 @@ seekADT = datatype <|> (takeP Nothing 1 >> seekADT)
 
 premodule :: Parser [Declaration]
 premodule = do
-  adts <- lookAhead $ many $ seekADT
+  adts <- lookAhead $ many $ try seekADT
   sequence $ adtCtors <$> adts
   sc >> decls
   where
