@@ -79,10 +79,10 @@ import_ = do
     isFileID x = elem x (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
 
 seekADT :: Parser [ADT]
-seekADT = lookAhead $ sc >> many go
+seekADT = lookAhead $ sc >> many (try go)
   where
     go :: Parser ADT
-    go = (try datatype) <|> (takeP Nothing 1 >> sc >> go)
+    go = datatype <|> (takeP Nothing 1 >> sc >> go)
 
 premodule :: Parser [Declaration]
 premodule = do
