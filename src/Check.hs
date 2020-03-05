@@ -144,7 +144,7 @@ check term = case term of
     writeLog (m, eval (erase mT) mod, ctx)
     check x
   Hol n -> return $ Hol (n `T.append` "_type")
-  Ref n -> do
+  Ref n _ -> do
     ds <- asks (_defs . _module)
     rs <- gets _refTypes
     case (M.lookup n ds, M.lookup n rs) of

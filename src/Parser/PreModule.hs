@@ -21,10 +21,10 @@ import Parser.Lang
 
 declaration :: Parser Declaration
 declaration = choice
-  [ try $ definition
-  , try $ enum
+  [ try $ enum
   , try $ Data <$> datatype
   , try $ import_
+  , definition
   ]
 
 definition :: Parser Declaration
@@ -36,14 +36,10 @@ definition = do
 enum :: Parser Declaration
 enum = do
   sym "enum"
-  Enum <$> some e
+  n <- try $ optional (name <* sc)
+  Enum n <$> some e
   where
-    e = do
-      sym "|"
-      n <- name
-      names n
-      sc
-      return n
+    e = do sym "|"; n <- name; names n; sc; return n
 
 datatype :: Parser ADT
 datatype = do
@@ -100,7 +96,7 @@ premodule = do
          Expr n t -> do
            ds <- decls
            return $ d : ds
-         Enum ns -> do
+         Enum _ _ -> do
            ds <- decls
            return $ d : ds
          Data (ADT _ _ _ cs) -> do

@@ -74,9 +74,9 @@ spec = do
 
     it "anonymous arguments: \"(:Type) -> A\"" $ do
       parse' allLam "(:Type) -> A" `shouldBe`
-        (Just $ All "_" Typ Keep (Ref "A" 0))
+        (Just $ All "_" Typ Keep (Ref "A" 0 1))
       parse' allLam "(:Type, :Type) -> A" `shouldBe`
-        (Just $ All "_" Typ Keep (All "_" Typ Keep (Ref "A" 0)))
+        (Just $ All "_" Typ Keep (All "_" Typ Keep (Ref "A" 0 2)))
 
 
     it "correct deBruijn indices" $ do
@@ -97,65 +97,65 @@ spec = do
           (App (Var 0) (Var 1) Keep)))
   describe "Application" $ do
     it "function style applications: \"f(a)\"" $ do
-      parse' term "f(a)" `shouldBe` (Just (App (Ref "f" 0) (Ref "a" 0) Keep))
+      parse' term "f(a)" `shouldBe` (Just (App (Ref "f" 0 0) (Ref "a" 0 0) Keep))
     it "multiple arguments: \"f(a,b,c)\"" $ do
       parse' term "f(a,b)" `shouldBe`
-        (Just (App (App (Ref "f" 0) (Ref "a" 0) Keep) (Ref "b" 0) Keep))
+        (Just (App (App (Ref "f" 0 0) (Ref "a" 0 0) Keep) (Ref "b" 0 0) Keep))
       parse' term "f(a,b,c)" `shouldBe`
         (Just
           (App (App (App
-            (Ref "f" 0)
-              (Ref "a" 0) Keep)
-              (Ref "b" 0) Keep)
-              (Ref "c" 0) Keep))
+            (Ref "f" 0 0)
+              (Ref "a" 0 0) Keep)
+              (Ref "b" 0 0) Keep)
+              (Ref "c" 0 0) Keep))
     it "parenthesized arguments: \"f(a)(b)(c)\"" $ do
       parse' term "f(a)(b)(c)" `shouldBe`
         (Just
           (App (App (App
-            (Ref "f" 0)
-            (Ref "a" 0) Keep)
-            (Ref "b" 0) Keep)
-            (Ref "c" 0) Keep))
+            (Ref "f" 0 0)
+            (Ref "a" 0 0) Keep)
+            (Ref "b" 0 0) Keep)
+            (Ref "c" 0 0) Keep))
     it "erased parenthesized arguments: \"f(a;)(b;)(c;)\"" $ do
       parse' term "f(a;)(b;)(c;)" `shouldBe`
         (Just
           (App (App (App
-            (Ref "f" 0)
-              (Ref "a" 0) Eras)
-              (Ref "b" 0) Eras)
-              (Ref "c" 0) Eras))
+            (Ref "f" 0 0)
+              (Ref "a" 0 0) Eras)
+              (Ref "b" 0 0) Eras)
+              (Ref "c" 0 0) Eras))
     it "erased arguments: \"f(a;b;c;)\"" $ do
       parse' term "f(a;b;c;)" `shouldBe`
         (Just
           (App (App (App
-            (Ref "f" 0)
-            (Ref "a" 0) Eras)
-            (Ref "b" 0) Eras)
-            (Ref "c" 0) Eras))
+            (Ref "f" 0 0)
+            (Ref "a" 0 0) Eras)
+            (Ref "b" 0 0) Eras)
+            (Ref "c" 0 0) Eras))
     it "applying a lambda: \"((x) => x)(a,b)\"" $ do
       parse' term "((x) => x)(a,b)" `shouldBe`
         (Just (App (App
           (Lam "x" (Hol "#0") Keep (Var 0))
-          (Ref "a" 0) Keep)
-          (Ref "b" 0) Keep))
+          (Ref "a" 0 0) Keep)
+          (Ref "b" 0 0) Keep))
     it "lambda style applications: \"(f a b c)\"" $ do
       parse' term "(f a b c)" `shouldBe`
         (Just (App (App (App
-          (Ref "f" 0)
-          (Ref "a" 0) Keep)
-          (Ref "b" 0) Keep)
-          (Ref "c" 0) Keep))
+          (Ref "f" 0 0)
+          (Ref "a" 0 0) Keep)
+          (Ref "b" 0 0) Keep)
+          (Ref "c" 0 0) Keep))
     it "lambda style applications: \"(f (a b) c)\"" $ do
       parse' term "(f (a b) c)" `shouldBe`
         (Just (App (App
-          (Ref "f" 0)
-          (App (Ref "a" 0) (Ref "b" 0) Keep) Keep)
-          (Ref "c" 0) Keep))
+          (Ref "f" 0 0)
+          (App (Ref "a" 0 0) (Ref "b" 0 0) Keep) Keep)
+          (Ref "c" 0 0) Keep))
       parse' term "(f (a (b c)))" `shouldBe`
         (Just
-          (App (Ref "f" 0)
-            (App (Ref "a" 0)
-              (App (Ref "b" 0) (Ref "c" 0) Keep)
+          (App (Ref "f" 0 0)
+            (App (Ref "a" 0 0)
+              (App (Ref "b" 0 0) (Ref "c" 0 0) Keep)
             Keep)
           Keep))
 
@@ -164,28 +164,28 @@ spec = do
       parse' let_ "let x = 1; 2" `shouldBe`
         (Just $ Let (M.fromList [("x", U64 1)]) (U64 2))
     it "bare reference: \"x\"" $ do
-      parse' term "x" `shouldBe` (Just (Ref "x" 0))
+      parse' term "x" `shouldBe` (Just (Ref "x" 0 0))
     it "referencing a Let: \"let x = 0; x\"" $ do
       parse' let_ "let x = 0; x" `shouldBe`
-        (Just $ Let (M.fromList [("x",U64 0)]) (Ref "x" 0))
+        (Just $ Let (M.fromList [("x",U64 0)]) (Ref "x" 0 0))
     it "name-shadowing with let: \"let x = 1; let x = 0; x\"" $ do
       parse' let_ "let x = 1; let x = 0; x" `shouldBe`
         (Just $
           Let (M.fromList [("x",U64 1)]) $
           Let (M.fromList [("x",U64 0)]) $
-          (Ref "x" 0))
+          (Ref "x" 0 0))
     it "unshadowing: \"let x = 1; let x = 0; ^x\"" $ do
       parse' let_ "let x = 1; let x = 0; ^x" `shouldBe`
         (Just $
           Let (M.fromList [("x",U64 1)]) $
           (Let (M.fromList [("x",U64 0)]) $
-          (Ref "x" 1)))
+          (Ref "x" 1 0)))
     it "referencing out of local scope: \"let x = 1; let x = 0; ^^x\"" $ do
       parse' let_ "let x = 1; let x = 0; ^^x" `shouldBe`
         (Just $
           Let (M.fromList [("x",U64 1)]) $
           Let (M.fromList [("x",U64 0)]) $
-          (Ref "x" 2))
+          (Ref "x" 2 0))
     it "mixing lets and lambdas: \"let x = 2; let x = 1; ((x) => x)(0)\"" $ do
       parse' let_ "let x = 2; let x = 1; ((x) => x)(0)" `shouldBe`
         (Just $
@@ -196,24 +196,24 @@ spec = do
         (Just $
           Let (M.fromList [("x",U64 2)]) $
           Let (M.fromList [("x",U64 1)]) $
-          (App (Lam "x" (Hol "#0") Keep (Ref "x" 0)) (U64 0) Keep))
+          (App (Lam "x" (Hol "#0") Keep (Ref "x" 0 1)) (U64 0) Keep))
       parse' term "let x = 2; let x = 1; ((x) => ^^x)(0)" `shouldBe`
         (Just $
           Let (M.fromList [("x",U64 2)]) $
           Let (M.fromList [("x",U64 1)]) $
-          (App (Lam "x" (Hol "#0") Keep (Ref "x" 1)) (U64 0) Keep))
+          (App (Lam "x" (Hol "#0") Keep (Ref "x" 1 1)) (U64 0) Keep))
       parse' term "let x = 2; let x = 1; ((x) => ^^^x)(0)" `shouldBe`
         (Just $
           Let (M.fromList [("x",U64 2)]) $
           Let (M.fromList [("x",U64 1)]) $
-          (App (Lam "x" (Hol "#0") Keep (Ref "x" 2)) (U64 0) Keep))
+          (App (Lam "x" (Hol "#0") Keep (Ref "x" 2 1)) (U64 0) Keep))
       parse' term "((x) => let x = 1; let x = 0; x)(2)" `shouldBe`
         (Just $
           App
             (Lam "x" (Hol "#0") Keep $
               Let (M.fromList [("x",U64 1)]) $
               Let (M.fromList [("x",U64 0)]) $
-              (Ref "x" 0))
+              (Ref "x" 0 0))
             (U64 2) Keep)
       parse' term "((x) => let x = 1; let x = 0; ^x)(2)" `shouldBe`
         (Just $
@@ -221,7 +221,7 @@ spec = do
             (Lam "x" (Hol "#0") Keep $
               Let (M.fromList [("x",U64 1)]) $
               Let (M.fromList [("x",U64 0)]) $
-              (Ref "x" 1))
+              (Ref "x" 1 0))
             (U64 2) Keep)
       parse' term "((x) => let x = 1; let x = 0; ^^x)(2)" `shouldBe`
         (Just $
@@ -235,7 +235,7 @@ spec = do
             (Lam "x" (Hol "#0") Keep $
               Let (M.fromList [("x",U64 1)]) $
               Let (M.fromList [("x",U64 0)]) $
-              (Ref "x" 2)) (U64 2) Keep)
+              (Ref "x" 2 1)) (U64 2) Keep)
       parse' term "((x) => let x = 2; ((x) => let x = 0; x)(1))(3)" `shouldBe`
         (Just $
           App
@@ -244,7 +244,7 @@ spec = do
                 (App
                   (Lam "x" (Hol "#1") Keep $
                   Let (M.fromList [("x",U64 0)])
-                  (Ref "x" 0))
+                  (Ref "x" 0 0))
                   (U64 1) Keep))
             (U64 3) Keep)
       parse' term "((x) => let x = 2; ((x) => let x = 0; ^x)(1))(3)" `shouldBe`
@@ -268,7 +268,7 @@ spec = do
             (App
               (Lam "x" (Hol "#1") Keep $
               Let (M.fromList [("x",U64 0)])
-              (Ref "x" 1))
+              (Ref "x" 1 1))
               (U64 1) Keep))
           (U64 3) Keep)
       parse' term "((x) => let x = 2; ((x) => let x = 0; ^^^x)(1))(3)" `shouldBe`
@@ -285,43 +285,43 @@ spec = do
 
     it "let block" $ do
       parse' term "let (x = 1; y = 2); y" `shouldBe`
-        (Just $ (Let (M.fromList [("x",U64 1),("y",U64 2)]) (Ref "y" 0)))
+        (Just $ (Let (M.fromList [("x",U64 1),("y",U64 2)]) (Ref "y" 0 0)))
       parse' term "let (x = 1 y = 2); y" `shouldBe`
-        (Just $ (Let (M.fromList [("x",U64 1),("y",U64 2)]) (Ref "y" 0)))
+        (Just $ (Let (M.fromList [("x",U64 1),("y",U64 2)]) (Ref "y" 0 0)))
 
 
   describe "when/switch" $ do
     it "when" $ do
       parse' whn "when | x => 0 else 1" `shouldBe`
-        (Just $ Whn [(Ref "x" 0, U64 0)] (U64 1))
+        (Just $ Whn [(Ref "x" 0 0, U64 0)] (U64 1))
       parse' whn "when | x => 0 | y => 1 else 2" `shouldBe`
-        (Just $ Whn [(Ref "x" 0, U64 0),(Ref "y" 0, U64 1)] (U64 2))
+        (Just $ Whn [(Ref "x" 0 0, U64 0),(Ref "y" 0 0, U64 1)] (U64 2))
       parse' whn "when | x === a => 0 | y === b => 1 else 2" `shouldBe`
         (Just $
           Whn
-            [ (Opr EQL (Ref "x" 0) (Ref "a" 0), U64 0)
-            , (Opr EQL (Ref "y" 0) (Ref "b" 0), U64 1)
+            [ (Opr EQL (Ref "x" 0 0) (Ref "a" 0 0), U64 0)
+            , (Opr EQL (Ref "y" 0 0) (Ref "b" 0 0), U64 1)
             ] (U64 2))
     it "switch" $ do
       parse' swt "switch x | a => 0 else 1" `shouldBe`
-        (Just $ Swt (Ref "x" 0) [(Ref "a" 0, U64 0)] (U64 1))
+        (Just $ Swt (Ref "x" 0 0) [(Ref "a" 0 0, U64 0)] (U64 1))
       parse' swt "switch x | a => 0 | b => 2 else 1" `shouldBe`
         (Just $
-          Swt (Ref "x" 0)
-            [ (Ref "a" 0, U64 0)
-            , (Ref "b" 0, U64 2)
+          Swt (Ref "x" 0 0)
+            [ (Ref "a" 0 0, U64 0)
+            , (Ref "b" 0 0, U64 2)
             ] (U64 1))
   describe "ann/rewrite" $ do
     it "annotation" $ do
-      parse' term "x :: t" `shouldBe` (Just $ Ann (Ref "t" 0) (Ref "x" 0))
+      parse' term "x :: t" `shouldBe` (Just $ Ann (Ref "t" 0 0) (Ref "x" 0 0))
     it "rewrite" $ do
       parse' term "x :: rewrite (x) => P(x) with e" `shouldBe`
         (Just $
           Ann
             (Rwt
-              (Lam "x" (Hol "#0") Keep (App (Ref "P" 0) (Var 0) Keep))
-              (Ref "e" 0))
-            (Ref "x" 0))
+              (Lam "x" (Hol "#0") Keep (App (Ref "P" 0 1) (Var 0) Keep))
+              (Ref "e" 0 0))
+            (Ref "x" 0 0))
 
   describe "character literals" $ do
     it "alphabetic" $ do
@@ -363,14 +363,14 @@ spec = do
     it "opr from function application: \"P(a) -> A\"" $ do
       parse' term "P(a) -> A" `shouldBe`
         (Just $
-          All "_" (App (Ref "P" 0) (Ref "a" 0) Keep) Keep
-             (Ref "A" 0))
+          All "_" (App (Ref "P" 0 0) (Ref "a" 0 0) Keep) Keep
+             (Ref "A" 0 0))
 
     it "terms do not consume leading or trailing whitespace" $ do
       parse' (name <* eof) "a" `shouldBe` (Just $ "a")
       parse' (name <* eof) "a " `shouldBe` Nothing
       parse' (name <* eof) " a" `shouldBe` Nothing
-      parse' (refVar <* eof) "a" `shouldBe` (Just $ Ref "a" 0)
+      parse' (refVar <* eof) "a" `shouldBe` (Just $ Ref "a" 0 0)
       parse' (refVar <* eof) "a " `shouldBe` Nothing
       parse' (refVar <* eof) " a" `shouldBe` Nothing
       parse' (dbl <* eof) "Double" `shouldBe` (Just $ Dbl)
@@ -394,13 +394,13 @@ spec = do
       parse' (lst <* eof) "[]" `shouldBe` (Just $ Lst [])
       parse' (lst <* eof) "[] " `shouldBe` Nothing
       parse' (lst <* eof) " []" `shouldBe` Nothing
-      parse' (slf <* eof) "${x} A" `shouldBe` (Just $ Slf "x" (Ref "A" 0))
+      parse' (slf <* eof) "${x} A" `shouldBe` (Just $ Slf "x" (Ref "A" 0 1))
       parse' (slf <* eof) " ${x} A" `shouldBe` Nothing
       parse' (slf <* eof) "${x} A " `shouldBe` Nothing
-      parse' (new <* eof) "new(A) x" `shouldBe` (Just $ New (Ref "A" 0) (Ref "x" 0))
+      parse' (new <* eof) "new(A) x" `shouldBe` (Just $ New (Ref "A" 0 0) (Ref "x" 0 0))
       parse' (new <* eof) " new(A) x" `shouldBe` Nothing
       parse' (new <* eof) "new(A) x " `shouldBe` Nothing
-      parse' (log <* eof) "log(A) x" `shouldBe` (Just $ Log (Ref "A" 0) (Ref "x" 0))
+      parse' (log <* eof) "log(A) x" `shouldBe` (Just $ Log (Ref "A" 0 0) (Ref "x" 0 0))
       parse' (log <* eof) " log(A) x" `shouldBe` Nothing
       parse' (log <* eof) "log(A) x " `shouldBe` Nothing
       -- use

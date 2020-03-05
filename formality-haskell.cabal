@@ -36,6 +36,7 @@ library
     , cereal
     , bytestring
     , ieee754
+    , numeric-extras
   default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
 
 --executable fide
@@ -79,6 +80,7 @@ test-suite test
     , ieee754
     , cereal
     , bytestring
+    , numeric-extras
   default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
   other-modules: Runtime.Net
                 , Spec.Parser
@@ -86,9 +88,9 @@ test-suite test
                 , Spec.Parser.PreModule
                 , Spec.Parser.Utils
                 , Spec.Net
---                , Spec.Core
+                , Spec.Core
                 , Core
---                , CoreSyn
+                , CoreSyn
                 , Lang
                 , Check
                 , Pretty

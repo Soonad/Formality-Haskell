@@ -3,6 +3,7 @@
 module IEEE754 where
 
 import Numeric.IEEE
+import Numeric.Extras
 import Data.Word ( Word8, Word32, Word64 )
 import System.IO.Unsafe (unsafeDupablePerformIO)
 import Foreign.Marshal.Alloc (alloca)

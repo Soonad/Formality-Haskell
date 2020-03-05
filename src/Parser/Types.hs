@@ -41,8 +41,12 @@ type Parser = RWST ParseEnv () ParseState (ParsecT Void Text Identity)
 names :: Name -> Parser ()
 names n = do
   ds <- gets _names
+  when (Set.member n reservedNames) (fail "reserved Name")
   when (Set.member n ds) (fail "attempted to redefine a name")
   modify (\s -> s {_names = Set.union (Set.singleton n) ds})
+  where
+    reservedNames =
+      Set.fromList ["T", "enum", "case", "switch", "let", "when"]
 
 -- add a list of binders to the context
 binders :: [Binder] -> Parser a -> Parser a
@@ -54,7 +58,7 @@ block n p = do
   ds <- asks _block
   when (Set.member n ds) (fail "attempted to redefine a name")
   local (\e -> e { _block = Set.union (Set.singleton n) ds}) p
- 
+
 adtCtors :: Lang.ADT -> Parser ()
 adtCtors a@(Lang.ADT _ _ _ m) = do
   cs <- gets _adtCtors

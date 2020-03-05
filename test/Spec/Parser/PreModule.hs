@@ -56,12 +56,12 @@ spec = do
           )
     it "T The{A} (x : A) | the(x : A) : The(A,x)" $ do
         parse' datatype "T The{A} (x : A) | the(x : A) : The(A,x)" `shouldBe`
-          (Just $ 
+          (Just $
             ADT "The" [("A", Hol "#0")] [("x", Var 0)]
               (M.fromList
                 [("the"
                  , Ctor [("x", Var 0)]
-                     (Just (App (App (Ref "The" 0) (Var 1) Keep) (Var 0) Keep)))
+                     (Just (App (App (Ref "The" 0 2) (Var 1) Keep) (Var 0) Keep)))
                 ])
            )
     it "T Either{A,B} | lft(value : A) | rgt(value : B)" $ do
@@ -76,7 +76,9 @@ spec = do
 
   describe "Enum" $ do
     it "enum | FOO | BAR" $ do
-      parse' enum "enum | FOO | BAR" `shouldBe` (Just $ Enum ["FOO", "BAR"])
+      parse' enum "enum | FOO | BAR" `shouldBe` (Just $ Enum Nothing ["FOO", "BAR"])
+      parse' enum "enum Foobar | FOO | BAR" `shouldBe`
+        (Just $ Enum (Just "Foobar") ["FOO", "BAR"])
 
   describe "import" $ do
     it "import Nat" $ do
@@ -87,7 +89,7 @@ spec = do
       parse' premodule "T Empty foo case x : Word" `shouldBe`
         (Just $ 
           [ Data (ADT "Empty" [] [] M.empty)
-          , Expr "foo" (Cse (Ref "x" 0) [] M.empty (Just Wrd))
+          , Expr "foo" (Cse (Ref "x" 0 0) [] M.empty (Just Wrd))
           ]
         )
     it "Bool" $ do
@@ -99,7 +101,7 @@ spec = do
                [ ("true", Ctor [] Nothing)
                , ("false", Ctor [] Nothing)
                ]))
-          , Expr "foo" (Cse (Ref "true" 0) [] 
+          , Expr "foo" (Cse (Ref "true" 0 0) [] 
               (M.fromList [("true",U64 1), ("false",U64 2)])
               Nothing)
           ]
@@ -112,7 +114,7 @@ spec = do
                [ ("true", Ctor [] Nothing)
                , ("false", Ctor [] Nothing)
                ]))
-          , Expr "foo" (Cse (Ref "true" 0) [] 
+          , Expr "foo" (Cse (Ref "true" 0 0) [] 
               (M.fromList [("true",U64 1), ("false",U64 2)])
               Nothing)
           ]
@@ -121,7 +123,7 @@ spec = do
       parse' premodule
         "foo case true | true => 1 | false => 2 T Bool | true | false" `shouldBe`
         (Just $
-          [ Expr "foo" (Cse (Ref "true" 0) [] 
+          [ Expr "foo" (Cse (Ref "true" 0 0) [] 
               (M.fromList [("true",U64 1), ("false",U64 2)])
               Nothing)
           , Data (ADT "Bool" [] [] 

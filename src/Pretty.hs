@@ -38,12 +38,12 @@ pretty t = go t []
       New t x        -> cat ["new(", go t s, ")", go x s]
       Use x          -> cat ["use(", go x s, ")"]
 --      Num            -> "Number"
-      Val i          -> T.pack $ show i
+      --Val i          -> T.pack $ show i
       Op2 o a b      -> cat [go a s, showOp o, go b s]
       Op1 o a b      -> cat [T.pack $ show a, showOp o, go b s]
       Ite c t f      -> cat ["if ", go c s, " then ", go t s, " else ", go f s]
       Ann x y        -> cat [go y s, " :: ", go x s]
       Log x y        -> cat ["log(", go x s, "); ", go y s]
       Hol n          -> cat ["?", n]
-      Ref n          -> n
+      Ref n i        -> n
 

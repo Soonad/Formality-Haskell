@@ -51,17 +51,17 @@ refVar = do
   ctx <- asks _binders
   is <- optional (some (lit "^"))
   n <- name
-  let carets = (maybe 0 id (length <$> is))
+  let carets = maybe 0 id (length <$> is)
   return $ go ctx carets 0 0 n
   where
     go(x:xs) cs varIndex refCount n
       | VarB m <- x, n == m, cs == 0 = Var varIndex
       | VarB m <- x, n == m          = go xs (cs - 1) (varIndex + 1) refCount n
       | VarB m <- x, n /= m          = go xs cs (varIndex + 1) refCount n
-      | RefB m <- x, n == m, cs == 0 = Ref n refCount
+      | RefB m <- x, n == m, cs == 0 = Ref n refCount varIndex
       | RefB m <- x, n == m          = go xs (cs - 1) varIndex (refCount + 1) n
       | otherwise                    = go xs cs varIndex refCount n
-    go [] cs varIndex refCount n     = Ref n (cs + refCount)
+    go [] cs varIndex refCount n     = Ref n (cs + refCount) varIndex
 
 -- numeric type
 dbl :: Parser Term
@@ -230,7 +230,7 @@ opr x = do
     ">>>" -> return $ Opr SHR x y
     "<<"  -> return $ Opr SHL x y
     "===" -> return $ Opr EQL x y
-    f     -> return $ App (App (Ref f 0) x Keep) y Keep
+    -- f     -> return $ App (App (Ref f 0 0) x Keep) y Keep
   where
     reservedSymbols = ["|", "=>"]
 
@@ -295,7 +295,7 @@ namedTerm = do
   n <- optional $ try $ lookAhead name
   m <- term
   case (n,m) of
-    (Just n, Ref _ _) -> go n m
+    (Just n, Ref _ _ _) -> go n m
     (Just n, Var _)   -> go n m
     (_,  _) -> do
       n' <- sc >> sym "as" >> name
@@ -511,10 +511,10 @@ term = do
       , try $ nat
       , try $ f64
       , try $ u64
-      , try $ refVar
-      , try $ cse
       , try $ whn
+      , try $ cse
       , try $ swt
+      , try $ refVar
       , try $ lst
       , try $ par
       , try $ pTy

@@ -1,5 +1,6 @@
 module Parser
   ( parseDefault
+  , Parser.ParseError
   , module Lang
   , module Parser.Lang
   , module Parser.PreModule
@@ -48,4 +49,4 @@ fileTest p f = do
 --  print $ a
 --  print $ eval a Core.emptyModule
 
-
+type ParseError = ParseErrorBundle Text Void

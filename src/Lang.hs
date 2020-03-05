@@ -36,7 +36,7 @@ data Term
   | Ann Term Term                -- Type annotation
   | Log Term Term                -- inline log
   | Hol Name                     -- type hole or metavariable
-  | Ref Name Int                 -- reference to a definition
+  | Ref Name Int Int             -- reference to a definition
   | Str Text                     -- String value
   | Chr Char                     -- Character value
   | Nat Bool Int                 -- Natural number value
@@ -52,7 +52,7 @@ data Term
 -- Top-level definitions in a module
 data Declaration
   = Expr Name Term
-  | Enum [Name]
+  | Enum (Maybe Name) [Name]
   | Data ADT
   | Impt Text Text
   deriving (Eq, Show, Ord)
