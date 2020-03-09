@@ -25,7 +25,7 @@ data Term
   | Let (Map Name Term) Term     -- Recursive locally scoped definition
   | Whn [(Term, Term)] Term      -- When-statement
   | Swt Term [(Term,Term)] Term  -- Switch-statement
-  | Cse Term [(Name, Term, Term)] (Map Name Term) (Maybe Term) -- Case-statement
+  | Cse Term [(Name, Term, Term)] ADT (Map Name Term) (Maybe Term) -- Case-statement
   | Rwt Term Term                -- Rewrite
   | Wrd                          -- U64 Number type
   | Dbl                          -- F64 Number Type
@@ -44,7 +44,7 @@ data Term
   | Par [Term]                   -- Pair value
   | PTy [Term]                   -- Pair type
   | Get Name Name Term Term      -- Pair projection
-  | Lst [Term]                   -- List valu
+  | Lst [Term]                   -- List value
   | Sig [(Maybe Name,Term)] Term -- Sigma type
   deriving (Eq, Show, Ord)
 

@@ -42,15 +42,37 @@ data Term
   | Dbl                      -- floating point number type
   | F64 Double               -- floating point value
   | Wrd                      -- integer number type
-  | U64 Word64               -- integer valu
+  | U64 Word64               -- integer value
   | Op1 Op FNum Term         -- Unary operation (curried)
   | Op2 Op Term Term         -- Binary operation
   | Ite Term Term Term       -- If-then-else
   | Ann Term Term            -- Type annotation
   | Log Term Term            -- inline log
   | Hol Name                 -- type hole or metavariable
-  | Ref Name Int             -- reference to a definition
+  | Ref Name Cont            -- reference to a definition
   deriving (Eq, Show, Ord)
+
+newtype Cont = Cont { _cont :: Term -> Term }
+
+-- Cont is a continuation for correctin deBruijn index alignment when we
+-- dereference. Since the only functions in here should
+-- be `shift` and `subst` we could defunctionalize it with
+--
+-- | Ref Name [Cont]
+--
+-- data Cont = Shift Int Int | Subst Term Int
+--
+-- and then refunctionalize in `deref`
+
+instance Eq Cont where
+  a == b = True
+
+instance Show Cont where
+  show a = "_"
+
+instance Ord Cont where
+  compare a b = EQ
+
 
 data FNum = W Word64 | D Double deriving (Show, Eq, Ord)
 
@@ -61,14 +83,14 @@ data Module = Module
 emptyModule :: Module
 emptyModule = Module M.empty
 
--- shift DeBruijn indices in term by an increment at/greater than a depth
-shift :: Term -> Int -> Int -> Term
-shift term inc dep = let go x = shift x inc dep in case term of
+-- shift DeBruijn indices by an increment above a depth in a term
+shift :: Int -> Int -> Term -> Term
+shift inc dep term = let go x = shift inc dep x in case term of
   Var i        -> Var (if i < dep then i else (i + inc))
-  All n h e b  -> All n (go h) e (shift b inc (dep + 1))
-  Lam n h e b  -> Lam n (go h) e (shift b inc (dep + 1))
+  All n h e b  -> All n (go h) e (shift inc (dep + 1) b)
+  Lam n h e b  -> Lam n (go h) e (shift inc (dep + 1) b)
   App f a e    -> App (go f) (go a) e
-  Slf n t      -> Slf n (shift t inc (dep + 1))
+  Slf n t      -> Slf n (shift inc (dep + 1) t)
   New t x      -> New (go t) (go x)
   Use x        -> Use (go x)
   Op1 o a b    -> Op1 o a (go b)
@@ -76,20 +98,21 @@ shift term inc dep = let go x = shift x inc dep in case term of
   Ite c t f    -> Ite (go c) (go t) (go f)
   Ann t x      -> Ann (go t) (go x)
   Log m x      -> Log (go m) (go x)
+  Ref n f      -> Ref n (Cont $ shift inc dep . _cont f)
   x            -> x
 
--- substitute a value for an index at a certain depth
-subst :: Term -> Term -> Int -> Term
-subst term v dep =
-  let v'   = shift v 1 0
-      go x = subst x v dep
+-- substitute a value for an index at a certain depth in a term
+subst :: Term -> Int -> Term -> Term
+subst v dep term =
+  let v'   = shift 1 0 v
+      go x = subst v dep x
   in
   case term of
   Var i       -> if i == dep then v else Var (i - if i > dep then 1 else 0)
-  All n h e b -> All n (go h) e (subst b v' (dep + 1))
-  Lam n h e b -> Lam n (go h) e (subst b v' (dep + 1))
+  All n h e b -> All n (go h) e (subst v' (dep + 1) b)
+  Lam n h e b -> Lam n (go h) e (subst v' (dep + 1) b)
   App f a e   -> App (go f) (go a) e
-  Slf n t     -> Slf n (subst t v' (dep + 1))
+  Slf n t     -> Slf n (subst v' (dep + 1) t)
   New t x     -> New (go t) (go x)
   Use x       -> Use (go x)
   Op1 o a b   -> Op1 o a (go b)
@@ -97,18 +120,18 @@ subst term v dep =
   Ite c t f   -> Ite (go c) (go t) (go f)
   Ann t x     -> Ann (go t) (go x)
   Log m x     -> Log (go m) (go x)
+  Ref n f     -> Ref n (Cont $ subst v dep . _cont f)
   x           -> x
 
 substMany :: Term -> [Term] -> Int -> Term
 substMany t vals d = go t vals d 0
   where
     l = length vals - 1
-    go t (v:vs) d i = go (subst t (shift v (l - i) 0) (d + l - i)) vs d (i + 1)
+    go t (v:vs) d i = go (subst (shift (l - i) 0 v) (d + l - i) t) vs d (i + 1)
     go t [] d i = t
 
-deref :: Name -> Int -> Module -> Term
-deref n i defs = maybe (Ref n i) (\x -> shift x i 0) (M.lookup n (_defs defs))
-
+deref :: Name -> Cont -> Module -> Term
+deref n f defs = maybe (Ref n f) (_cont f) (M.lookup n (_defs defs))
 
 -- deBruijn
 eval :: Term -> Module -> Term
@@ -119,13 +142,14 @@ eval term mod = go term
     All n h e b -> All n h e b
     Lam n h e b -> Lam n h e (go b)
     App f a e   -> case go f of
-        Lam n h e b  -> go (subst b a 0)
+        Lam n h e b  -> go (subst a 0 b)
         f            -> App f (go a) e
     New t x      -> go x
     Use x        -> go x
     Op1 o a b    -> case go b of
         U64 n -> op o a (W n)
         F64 n -> op o a (D n)
+        x     -> Op1 o a x
     Op2 o a b   -> case go a of
         U64 n -> go (Op1 o (W n) b)
         F64 n -> go (Op1 o (D n) b)
@@ -135,15 +159,67 @@ eval term mod = go term
         x     -> Ite x t f
     Ann t x     -> go x
     Log m x     -> Log (go m) (go x)
-    Ref n i      -> case (deref n i mod) of
-      Ref n i -> go (deref n i mod)
-      x       -> (go x)
+    Ref n f     -> case (deref n f mod) of
+      Ref n f -> go (deref n f mod)
+      x       -> go x
     _           -> t
+
+-- for debugging
+debug_eval :: Term -> Module -> IO Term
+debug_eval term mod = go "top" term
+  where
+  go :: String -> Term -> IO Term
+  go n t = do
+    putStrLn $ n ++ " START: " ++ show t
+    t' <- go_inner t
+    putStrLn $ n ++ " END"
+    return t'
+
+  go_inner :: Term -> IO Term
+  go_inner t = case t of
+    All n h e b -> return $ All n h e b
+    Lam n h e b -> Lam n h e <$> (go "Lam" b)
+    App f a e   -> do
+      f <- go "App" f
+      case f of
+        Lam n h e b  -> do
+          (putStrLn $ "substituting " ++ show b ++ " <- " ++ show a) 
+          go "Subst" (subst a 0 b)
+        f            -> App f <$> (go "noLamArg" a) <*> return e
+    New t x      -> go "New" x 
+    Use x        -> go "Use" x
+    Op1 o a b    -> do
+      b <- go "Op1.b" b
+      case b of
+        U64 n -> return $ op o a (W n)
+        F64 n -> return $ op o a (D n)
+        x     -> return $ Op1 o a x
+    Op2 o a b   -> do
+      a <- go "Op2.a" a
+      case a of
+        U64 n -> go "Op2.b" (Op1 o (W n) b)
+        F64 n -> go "Op2.b" (Op1 o (D n) b)
+        x     -> return $ Op2 o x b
+    Ite c t f   -> do
+      c <- go "Ite.c" c
+      case c of
+        U64 n -> if n > 0 then go "Ite.t" t else go "Ite.f" f
+        x     -> return $ Ite x t f
+    Ann t x     -> go "Ann" x
+    Log m x     -> Log <$> (go "Log.m" m) <*> (go "Log.x" x)
+    Ref n f     -> do
+      putStrLn $ show t
+      case (deref n f mod) of
+        Ref n f -> go "derefAgain" (deref n f mod)
+        x       -> do
+          (putStrLn $ "Dereferencing " ++ T.unpack n ++ " <- " ++ show x)
+          (go "Deref" x)
+    _           -> return $ t
 
 erase :: Term -> Term
 erase term = case term of
   All n h e b    -> All n (erase h) e (erase b)
-  Lam n h Eras b -> erase $ subst b (Hol "#erased") 0
+  Lam n h Eras b -> erase $ subst (Hol "#erased") 0 b
   Lam n h e b    -> Lam n (erase h) e (erase b)
   App f a Eras   -> erase f
   App f a e      -> App (erase f) (erase a) e
@@ -166,6 +242,18 @@ data Op
   | SIN  | COS  | TAN  | ASIN | ACOS | ATAN
   | SINH | COSH | TANH | ASNH | ACSH | ATNH
   deriving (Eq, Show, Ord)
+
+
+-- A general principle with `op` is that we should avoid making the
+-- implementation (in this case Haskell) runtime error. i.e. all the primitive
+-- Formality operations should be total and we should rely on type-safe
+-- user-level librarys for partial functions like division. DIV is not division,
+-- it is division extended with the points DIV(x,0) = 0.
+--
+-- See https://www.hillelwayne.com/post/divide-by-zero/ for further discussion
+-- of whether this choice is reasonable
+
+-- TODO: Find and eliminate other possible runtime errors in this function
 
 op :: Op -> FNum -> FNum -> Term
 op op a b
@@ -234,5 +322,8 @@ op op a b
   | UTOF <- op, W b <- b           = F64 $ utof b
   | FTOU <- op, D b <- b           = U64 $ ftou b
   | otherwise = error $ "UndefinedArithmetic Op"
+    -- the only error op should raise is when there's an (OP, FNum, FNum)
+    -- combination outside of this set. This is a language implementation error
+    -- and should be impossible to generate from user-space
   where
     cst = fromIntegral

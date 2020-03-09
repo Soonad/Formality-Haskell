@@ -81,6 +81,7 @@ test-suite test
     , cereal
     , bytestring
     , numeric-extras
+    , raw-strings-qq
   default-extensions: OverloadedStrings, MultiWayIf, PatternGuards
   other-modules: Runtime.Net
                 , Spec.Parser

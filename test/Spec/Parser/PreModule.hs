@@ -84,55 +84,55 @@ spec = do
     it "import Nat" $ do
       parse' import_ "import Nat" `shouldBe` (Just $ Impt "Nat" "")
 
-  describe "case expressions" $ do
-    it "Empty" $ do
-      parse' premodule "T Empty foo case x : Word" `shouldBe`
-        (Just $ 
-          [ Data (ADT "Empty" [] [] M.empty)
-          , Expr "foo" (Cse (Ref "x" 0 0) [] M.empty (Just Wrd))
-          ]
-        )
-    it "Bool" $ do
-      parse' premodule
-        "T Bool | true | false foo case true | true => 1 | false => 2" `shouldBe`
-        (Just $ 
-          [ Data (ADT "Bool" [] [] 
-             (M.fromList
-               [ ("true", Ctor [] Nothing)
-               , ("false", Ctor [] Nothing)
-               ]))
-          , Expr "foo" (Cse (Ref "true" 0 0) [] 
-              (M.fromList [("true",U64 1), ("false",U64 2)])
-              Nothing)
-          ]
-        )
-      parse' premodule
-        "T Bool | true | false foo case true | false => 2 | true => 1" `shouldBe`
-        (Just $ 
-          [ Data (ADT "Bool" [] [] 
-             (M.fromList
-               [ ("true", Ctor [] Nothing)
-               , ("false", Ctor [] Nothing)
-               ]))
-          , Expr "foo" (Cse (Ref "true" 0 0) [] 
-              (M.fromList [("true",U64 1), ("false",U64 2)])
-              Nothing)
-          ]
-        )
-    it "Bool" $ do
-      parse' premodule
-        "foo case true | true => 1 | false => 2 T Bool | true | false" `shouldBe`
-        (Just $
-          [ Expr "foo" (Cse (Ref "true" 0 0) [] 
-              (M.fromList [("true",U64 1), ("false",U64 2)])
-              Nothing)
-          , Data (ADT "Bool" [] [] 
-             (M.fromList
-               [ ("true", Ctor [] Nothing)
-               , ("false", Ctor [] Nothing)
-               ]))
-          ]
-        )
+  --describe "case expressions" $ do
+    --it "Empty" $ do
+    --  parse' premodule "T Empty foo case x : Word" `shouldBe`
+    --    (Just $ 
+    --      [ Data (ADT "Empty" [] [] M.empty)
+    --      , Expr "foo" (Cse (Ref "x" 0 0) [] M.empty (Just Wrd))
+    --      ]
+    --    )
+    --it "Bool" $ do
+    --  parse' premodule
+    --    "T Bool | true | false foo case true | true => 1 | false => 2" `shouldBe`
+    --    (Just $ 
+    --      [ Data (ADT "Bool" [] [] 
+    --         (M.fromList
+    --           [ ("true", Ctor [] Nothing)
+    --           , ("false", Ctor [] Nothing)
+    --           ]))
+    --      , Expr "foo" (Cse (Ref "true" 0 0) [] 
+    --          (M.fromList [("true",U64 1), ("false",U64 2)])
+    --          Nothing)
+    --      ]
+    --    )
+    --  parse' premodule
+    --    "T Bool | true | false foo case true | false => 2 | true => 1" `shouldBe`
+    --    (Just $ 
+    --      [ Data (ADT "Bool" [] [] 
+    --         (M.fromList
+    --           [ ("true", Ctor [] Nothing)
+    --           , ("false", Ctor [] Nothing)
+    --           ]))
+    --      , Expr "foo" (Cse (Ref "true" 0 0) [] 
+    --          (M.fromList [("true",U64 1), ("false",U64 2)])
+    --          Nothing)
+    --      ]
+    --    )
+    --it "Bool" $ do
+    --  parse' premodule
+    --    "foo case true | true => 1 | false => 2 T Bool | true | false" `shouldBe`
+    --    (Just $
+    --      [ Expr "foo" (Cse (Ref "true" 0 0) [] 
+    --          (M.fromList [("true",U64 1), ("false",U64 2)])
+    --          Nothing)
+    --      , Data (ADT "Bool" [] [] 
+    --         (M.fromList
+    --           [ ("true", Ctor [] Nothing)
+    --           , ("false", Ctor [] Nothing)
+    --           ]))
+    --      ]
+    --    )
     --  parse' cse "case x | true => 1 | false => 0" `shouldBe`
     --    (Just $ Cse (Ref "x" 0) [] [("true", U64 1), ("false", U64 0)] Nothing)
     --it "\"as\" statement" $ do

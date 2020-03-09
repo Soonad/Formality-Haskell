@@ -1,3 +1,5 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module Spec.Core where
 
 import           Test.Hspec
@@ -15,6 +17,10 @@ import           Data.Set               (Set)
 import qualified Data.Set               as Set
 
 import           Text.Megaparsec            hiding (State)
+import           Text.RawString.QQ
+
+import qualified Data.Text              as T
+import qualified Data.Text.IO           as TIO
 
 import Core
 import Lang hiding (Term(..))
@@ -46,6 +52,35 @@ eval' name txt = do
   modl <- syn' txt
   term  <- maybe (Left ErrEval) Right $ M.lookup name (_defs modl)
   return $ eval term modl
+
+
+synFile:: FilePath -> IO ()
+synFile f = do
+  txt <- TIO.readFile f
+  print $ syn' txt
+
+evalFile:: FilePath -> IO ()
+evalFile f = do
+  txt <- TIO.readFile f
+  prettyModule $ syn' txt
+  print $ eval' "main" txt
+
+debug_evalFile:: FilePath -> IO Term
+debug_evalFile f = do
+  txt <- TIO.readFile f
+  let s = syn' txt
+  prettyModule $ s
+  a <- either (\x -> print x >> error "Error") return s
+  term  <- maybe (error "Error") return $ M.lookup "main" (_defs a)
+  debug_eval term a
+
+
+prettyModule :: Either Err Core.Module -> IO ()
+prettyModule (Left e) = print e
+prettyModule (Right (Module m)) = go (M.toList m)
+  where
+    go ((n,t):ns) = putStr (T.unpack n) >> putStr " = " >> print t >> go ns
+    go [] = putStrLn ""
 
 spec :: SpecWith ()
 spec = do
@@ -114,24 +149,59 @@ spec = do
         eval' "f" "f let (f(x,y) = x; y = f(1,2)); y" `shouldBe` 
           (Right $ U64 1)
 
-      it "\"let (isOdd(x) = if x == 1 then 1 else isEven(x - 1); isEven(x) = if x == 1 then 0 else isOdd(x - 1);); isEven(42)\"" $ do
-        eval' "f"
-          (T.concat
-            [ "f let ("
-            , "    isOdd(x)  = if x === 1 then 1 else isEven(x - 1);"
-            , "    isEven(x) = if x === 1 then 0 else isOdd(x - 1);"
-            , "  );"
-            , "isEven(42)"
-            ]) `shouldBe`
-          (Right $ U64 1)
+      it "mutual recursion" $ do
+        (eval' "f" [r|
+f
+  let (
+    isOdd(x)  = if x === 1 then 1 else isEven(x - 1);
+    isEven(x) = if x === 1 then 0 else isOdd(x - 1);
+  );
+  isEven(42)
 
-      it "\"let (isOdd(x) = if x == 1 then 1 else isEven(x - 1); isEven(x) = if x == 1 then 0 else isOdd(x - 1);); isOdd(43)\"" $ do
-        eval' "f"
-          (T.concat
-            [ "f let ("
-            , "    isOdd(x) = if x === 1 then 1 else isEven(x - 1); "
-            , "    isEven(x) = if x === 1 then 0 else isOdd(x - 1);"
-            , "   );"
-            , "isOdd(43)"
-            ]) `shouldBe`
-          (Right $ U64 1)
+        |]) `shouldBe` (Right $ U64 1)
+
+        (eval' "f" [r|
+f
+  let (
+    isOdd(x)  = if x === 1 then 1 else isEven(x - 1);
+    isEven(x) = if x === 1 then 0 else isOdd(x - 1);
+  );
+  isOdd(43)
+
+        |]) `shouldBe` (Right $ U64 1)
+
+      it "closure" $ do
+        (eval' "main" [r|
+main f(1,2,3)
+
+f(x,y,z)
+  let p = x
+  let q = y
+  let r = z
+  p + q + r
+        |]) `shouldBe` (Right $ U64 6)
+
+
+        (eval' "main" [r|
+main f(1,2,3,4)
+
+f(x,y,z)
+  let q = (a) => x + y + a
+  (w) => q(1) + g(x,y,z) + w
+
+g(x,y,z)
+  let p = x
+  let q = y
+  let r = z
+  p + q + r
+        |]) `shouldBe` (Right $ U64 14)
+
+        (eval' "main" [r|
+main f(1,2,3)
+
+f(x,y,z)
+  let q = y + z
+  if x then q else y
+        |]) `shouldBe` (Right $ U64 5)
+
+

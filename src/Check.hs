@@ -91,7 +91,7 @@ check term = case term of
     when (i < 0 || i >= length ctx) (ask >>= (throwError . UnboundVariable i))
     let (Binder n t e) = ctx !! i
     when (e == Eras && eras == Keep) (throwError $ ErasedInKeptPosition n)
-    return $ (shift t (i + 1) 0)
+    return $ (shift (i + 1) 0 t)
   Typ   -> return Typ
   All name from e to -> do
     erased $ expect Typ from
@@ -111,7 +111,7 @@ check term = case term of
       All _ from e' to -> do
         when (e /= e') (throwError $ ErasureMismatch term)
         constrain (from, argType)
-        return (subst to arg 0)
+        return (subst arg 0 to)
       _               -> do
         (h1,h2) <- (,) <$> newHole <*> newHole
         e1      <- asks _erased
@@ -122,12 +122,12 @@ check term = case term of
   New t x -> do
     h <- newHole
     tT <- expect (Slf "_" h) t
-    xT <- expect (subst h (Ann t (New t x)) 0) x
+    xT <- expect (subst (Ann t (New t x)) 0 h) x
     return t
   Use x -> do
     h  <- newHole
     xT <- expect (Slf "_" h) x
-    return (subst h x 0)
+    return (subst x 0 h)
   --Num   -> return Typ
   --Val _ -> return Num
   --Op1 o a b -> expect Num b

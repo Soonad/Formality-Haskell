@@ -254,8 +254,8 @@ cse = do
   sym "case"
   (as,m) <- namedTerm <* sc
   ws     <- sepBy' wit sc <* sc
-  (cs,t) <- cases as <|> empty
-  return $ Cse m ws cs t
+  (adt,cs,t) <- cases as <|> empty
+  return $ Cse m ws adt cs t
   where
     wit :: Parser (Name, Term, Term)
     wit = do
@@ -263,19 +263,22 @@ cse = do
       t     <- (sc >> sym ":" >> term) <|> newHole
       return (n,m,t)
 
-    empty :: Parser (Map Name Term, Maybe Term)
-    empty = (\x -> (M.empty,x)) <$> (Just <$> (sym ":" >> term))
+    empty :: Parser (ADT, Map Name Term, Maybe Term)
+    empty = do
+      t <- sym ":" >> term
+      let e = ADT "Empty" [] [] M.empty
+      return (e,M.empty,Just t)
 
-    cases :: Name -> Parser (Map Name Term, Maybe Term)
+    cases :: Name -> Parser (ADT, Map Name Term, Maybe Term)
     cases as = do
       n <- lookAhead (sym "|" >> name)
       acs   <- gets _adtCtors
       case acs M.!? n of
         Nothing -> fail "can't find ADT"
-        Just (ADT _ ps _ m) -> do
+        Just a@(ADT _ ps _ m) -> do
           cs <- go as ps m []
           ty <- optional $ try $ (sc >> sym ":" >> term)
-          return $ (cs, ty)
+          return $ (a, cs, ty)
 
     go :: Name -> [Param] -> M.Map Name Ctor -> [(Name,Term)] -> Parser (Map Name Term)
     go as ps m cs = do
